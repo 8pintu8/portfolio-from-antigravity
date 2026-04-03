@@ -73,10 +73,9 @@ export default function BalconyStructure() {
         </mesh>
       ))}
 
-      {/* Floor edge trim */}
+      {/* Floor edge trim — decorative border along front edge */}
       <mesh position={[0, 0.05, -3.5]}>
         <boxGeometry args={[12.2, 0.12, 0.12]} />
-        {stoneMat.clone && <primitive object={stoneMat} attach="material" />}
         <meshStandardMaterial color={0x7A6B5B} roughness={0.8} />
       </mesh>
 
@@ -120,10 +119,9 @@ export default function BalconyStructure() {
         <boxGeometry args={[1.5, 2, 0.08]} />
         <meshStandardMaterial color={0x1A3045} roughness={0.3} metalness={0.1} />
       </mesh>
-      {/* Window frame border */}
+      {/* Window frame border — dark wood surround */}
       <mesh position={[-3, 2.5, 4.76]}>
         <boxGeometry args={[1.7, 2.2, 0.04]} />
-        {darkWoodMat.clone && <primitive object={darkWoodMat} attach="material" />}
         <meshStandardMaterial color={0x4A3828} roughness={0.7} />
       </mesh>
 

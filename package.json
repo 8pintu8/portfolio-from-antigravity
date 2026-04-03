@@ -1,7 +1,8 @@
 {
   "name": "antigravity",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "The Balcony — An immersive 3D spatial portfolio",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,8 +14,6 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",
-    "gsap": "^3.14.2",
-    "howler": "^2.2.4",
     "postprocessing": "^6.39.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -32,5 +31,9 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "vite": "^8.0.1"
+  },
+  "_notes_removed_deps": {
+    "_howler": "Removed: was unused. To reinstall for audio file playback: npm i howler. Then import { Howl } from 'howler' in SoundscapeManager.jsx. Currently using native Web Audio API instead.",
+    "_gsap": "Removed: was unused. To reinstall for complex timeline animations: npm i gsap. Then import { gsap } from 'gsap' in any component. Useful for camera fly-in sequences, staggered reveals, etc."
   }
 }

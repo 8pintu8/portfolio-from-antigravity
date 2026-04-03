@@ -2,12 +2,79 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#080808" />
+
+    <!-- SEO -->
+    <title>The Balcony — A Spatial Portfolio</title>
+    <meta name="description" content="An immersive 3D portfolio experience showcasing creative technology, product design, and research. Built with React Three Fiber." />
+    <meta name="author" content="Your Name" />
+
+    <!-- Open Graph (social media previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="The Balcony — A Spatial Portfolio" />
+    <meta property="og:description" content="An immersive 3D interactive portfolio built with Three.js and React." />
+    <meta property="og:url" content="https://yoursite.com" />
+
+    <!-- Twitter card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="The Balcony — A Spatial Portfolio" />
+
+    <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>antigravity</title>
+
+    <!-- WebGL detection — shows warning before JS even loads -->
+    <style>
+      .no-webgl-warning {
+        display: none;
+        position: fixed; inset: 0;
+        background: #080808; color: #F5E6D3;
+        font-family: -apple-system, sans-serif;
+        text-align: center;
+        padding: 3rem 1.5rem;
+        z-index: 10000;
+      }
+      .no-webgl-warning h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+      .no-webgl-warning p { font-size: 0.9rem; color: rgba(255,255,255,0.5); line-height: 1.6; }
+    </style>
+    <script>
+      // Quick WebGL check before React loads
+      try {
+        var c = document.createElement('canvas');
+        var ok = !!(c.getContext('webgl2') || c.getContext('webgl'));
+        if (!ok) throw new Error();
+      } catch (e) {
+        document.addEventListener('DOMContentLoaded', function() {
+          document.getElementById('root').style.display = 'none';
+          document.getElementById('no-webgl').style.display = 'flex';
+          document.getElementById('no-webgl').style.alignItems = 'center';
+          document.getElementById('no-webgl').style.justifyContent = 'center';
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- Shown only if WebGL is unavailable -->
+    <div id="no-webgl" class="no-webgl-warning">
+      <div>
+        <h1>WebGL Not Available</h1>
+        <p>This portfolio uses 3D graphics that require WebGL support.<br/>
+        Please try a modern browser like Chrome, Firefox, or Edge.</p>
+      </div>
+    </div>
+
+    <!-- Shown only if JavaScript is disabled -->
+    <noscript>
+      <div style="position:fixed;inset:0;background:#080808;color:#F5E6D3;display:flex;align-items:center;justify-content:center;text-align:center;padding:2rem;font-family:sans-serif;">
+        <div>
+          <h1>JavaScript Required</h1>
+          <p>This portfolio is an interactive 3D experience that requires JavaScript to run.</p>
+        </div>
+      </div>
+    </noscript>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

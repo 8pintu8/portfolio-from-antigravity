@@ -1,8 +1,30 @@
+/**
+ * ╔═══════════════════════════════════════════════════════════════╗
+ * ║  WeatherEffects.jsx — Rain, snow, and other weather particles ║
+ * ╚═══════════════════════════════════════════════════════════════╝
+ *
+ * HOW IT WORKS:
+ *   Uses a FIXED-SIZE particle buffer (MAX_PARTICLES) that never resizes.
+ *   When weather changes, we show/hide particles by count, not by recreating arrays.
+ *   This prevents the THREE.WebGLAttributes buffer resize crash.
+ *
+ * HOW TO EDIT:
+ *   - Change MAX_PARTICLES for more/fewer particles (higher = heavier GPU usage)
+ *   - Change SPREAD_X / SPREAD_Z for particle area coverage
+ *   - Change fall speeds in the useFrame loop
+ */
+
 import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import useStore from '../../store/useStore';
 import { getWeatherSceneParams } from '../../utils/weather';
+
+// Fixed max particle count — buffer is allocated once and never resized
+const MAX_PARTICLES = 3000;
+const SPREAD_X = 30;
+const SPREAD_Z = 30;
+const MAX_HEIGHT = 15;
 
 export default function WeatherEffects() {
   const weather = useStore((s) => s.weather);
@@ -11,55 +33,62 @@ export default function WeatherEffects() {
 
   const sceneParams = useMemo(() => getWeatherSceneParams(weather), [weather]);
 
-  const maxParticles = useMemo(() => {
+  // How many of the MAX_PARTICLES to actually animate this frame
+  const activeCount = useMemo(() => {
     if (!sceneParams.particleType) return 0;
     const scale = qualityLevel === 'low' ? 0.25 : qualityLevel === 'medium' ? 0.5 : 1;
-    return Math.floor(sceneParams.particleCount * scale);
+    return Math.min(Math.floor(sceneParams.particleCount * scale), MAX_PARTICLES);
   }, [sceneParams, qualityLevel]);
 
-  // Particle positions
+  // Pre-allocate a FIXED buffer — never changes size
   const positions = useMemo(() => {
-    if (maxParticles === 0) return null;
-    const arr = new Float32Array(maxParticles * 3);
-    for (let i = 0; i < maxParticles; i++) {
-      arr[i * 3] = (Math.random() - 0.5) * 30;     // X spread
-      arr[i * 3 + 1] = Math.random() * 15;           // Y height
-      arr[i * 3 + 2] = (Math.random() - 0.5) * 30;  // Z spread
+    const arr = new Float32Array(MAX_PARTICLES * 3);
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      arr[i * 3]     = (Math.random() - 0.5) * SPREAD_X;
+      arr[i * 3 + 1] = Math.random() * MAX_HEIGHT;
+      arr[i * 3 + 2] = (Math.random() - 0.5) * SPREAD_Z;
     }
     return arr;
-  }, [maxParticles]);
+  }, []); // Never recreated — this is the key fix
 
-  // Animate particles
+  // Animate active particles, leave excess offscreen
   useFrame((_, delta) => {
-    if (!pointsRef.current || !positions) return;
+    if (!pointsRef.current || activeCount === 0) return;
 
     const pos = pointsRef.current.geometry.attributes.position.array;
     const isSnow = sceneParams.particleType === 'snow';
     const fallSpeed = isSnow ? 1.5 : 12;
     const drift = sceneParams.windStrength * 2;
 
-    for (let i = 0; i < maxParticles; i++) {
-      pos[i * 3 + 1] -= fallSpeed * delta; // fall
-      pos[i * 3] += drift * delta;          // wind drift
+    for (let i = 0; i < activeCount; i++) {
+      pos[i * 3 + 1] -= fallSpeed * delta;   // Fall down
+      pos[i * 3]     += drift * delta;        // Wind drift
 
       // Reset when below ground
       if (pos[i * 3 + 1] < -1) {
-        pos[i * 3 + 1] = 15;
-        pos[i * 3] = (Math.random() - 0.5) * 30;
-        pos[i * 3 + 2] = (Math.random() - 0.5) * 30;
+        pos[i * 3 + 1] = MAX_HEIGHT;
+        pos[i * 3]     = (Math.random() - 0.5) * SPREAD_X;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * SPREAD_Z;
       }
     }
+
+    // Push inactive particles far below (invisible)
+    for (let i = activeCount; i < MAX_PARTICLES; i++) {
+      pos[i * 3 + 1] = -100;
+    }
+
     pointsRef.current.geometry.attributes.position.needsUpdate = true;
   });
 
-  if (maxParticles === 0) return null;
+  // Hide entirely when no weather particles needed
+  if (!sceneParams.particleType) return null;
 
   return (
     <points ref={pointsRef}>
       <bufferGeometry>
         <bufferAttribute
           attach="attributes-position"
-          count={maxParticles}
+          count={MAX_PARTICLES}
           array={positions}
           itemSize={3}
         />
@@ -70,6 +99,7 @@ export default function WeatherEffects() {
         transparent
         opacity={0.6}
         sizeAttenuation
+        depthWrite={false}
       />
     </points>
   );

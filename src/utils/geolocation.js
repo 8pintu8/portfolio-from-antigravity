@@ -20,13 +20,6 @@ export async function getUserLocation() {
     const { latitude: lat, longitude: lon } = pos.coords;
 
     // Try reverse geocode for city name
-    try {
-      const geo = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=&latitude=${lat}&longitude=${lon}&count=1`
-      );
-      // This endpoint doesn't support reverse geocoding well, 
-      // so we'll use the IP fallback for city name
-    } catch {}
 
     return { lat, lon, city: 'Your Location', country: '' };
   } catch (geoErr) {

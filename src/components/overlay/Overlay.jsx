@@ -1,17 +1,29 @@
+/**
+ * ╔═══════════════════════════════════════════════════════════╗
+ * ║  Overlay.jsx — HUD elements always visible on screen      ║
+ * ╚═══════════════════════════════════════════════════════════╝
+ *
+ * Contains:
+ *   - Weather + time badge (top-right)
+ *   - Controls hint (bottom-left, auto-fades)
+ *   - Action buttons: Portfolio, Mute, Settings (bottom-right)
+ *   - Settings panel (centered modal)
+ */
+
 import { useState, useEffect } from 'react';
 import useStore from '../../store/useStore';
 
 const WEATHER_OPTIONS = [
-  { value: null, label: 'Auto', emoji: '🔄' },
-  { value: 'clear', label: 'Clear', emoji: '☀️' },
-  { value: 'clouds', label: 'Cloudy', emoji: '☁️' },
-  { value: 'rain', label: 'Rain', emoji: '🌧️' },
-  { value: 'snow', label: 'Snow', emoji: '❄️' },
-  { value: 'fog', label: 'Fog', emoji: '🌫️' },
+  { value: null,           label: 'Auto',  emoji: '🔄' },
+  { value: 'clear',        label: 'Clear', emoji: '☀️' },
+  { value: 'clouds',       label: 'Cloudy', emoji: '☁️' },
+  { value: 'rain',         label: 'Rain',  emoji: '🌧️' },
+  { value: 'snow',         label: 'Snow',  emoji: '❄️' },
+  { value: 'fog',          label: 'Fog',   emoji: '🌫️' },
   { value: 'thunderstorm', label: 'Storm', emoji: '⛈️' },
 ];
 
-export default function Overlay() {
+export default function Overlay({ onOpenPortfolio }) {
   const isMuted = useStore((s) => s.isMuted);
   const toggleMute = useStore((s) => s.toggleMute);
   const qualityLevel = useStore((s) => s.qualityLevel);
@@ -27,6 +39,7 @@ export default function Overlay() {
 
   const [showSettings, setShowSettings] = useState(false);
 
+  // Respect system reduce-motion preference
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (mq.matches) setReducedMotion(true);
@@ -35,6 +48,7 @@ export default function Overlay() {
     return () => mq.removeEventListener('change', h);
   }, [setReducedMotion]);
 
+  // Weather emoji map
   const weatherEmoji = {
     clear: '☀️', clouds: '☁️', fog: '🌫️', rain: '🌧️',
     drizzle: '🌦️', snow: '❄️', thunderstorm: '⛈️',
@@ -51,7 +65,7 @@ export default function Overlay() {
 
   return (
     <>
-      {/* HUD — top */}
+      {/* ═══ HUD: Weather + Time (top-right) ═══ */}
       <div className="hud-top">
         <div className="hud-weather">
           <span className="hud-emoji">{weatherEmoji[weather.condition] || '🌤️'}</span>
@@ -60,17 +74,26 @@ export default function Overlay() {
         <div className="hud-time">{formatTime()}</div>
       </div>
 
-      {/* HUD — controls hint (bottom left) */}
+      {/* ═══ HUD: Controls hint (bottom-left, auto-fades) ═══ */}
       <div className="hud-controls-hint">
-        <span>Drag to look · WASD to walk · Click objects to inspect</span>
+        <span>Drag to look · WASD to walk · Click objects</span>
       </div>
 
-      {/* HUD — actions (bottom right) */}
+      {/* ═══ HUD: Action buttons (bottom-right) ═══ */}
       <div className="hud-actions">
+        <button
+          className="hud-btn portfolio-btn"
+          onClick={onOpenPortfolio}
+          aria-label="Open portfolio"
+          title="Portfolio"
+        >
+          ☰
+        </button>
         <button
           className={`hud-btn ${!isMuted ? 'active' : ''}`}
           onClick={toggleMute}
           aria-label={isMuted ? 'Unmute' : 'Mute'}
+          title={isMuted ? 'Unmute' : 'Mute'}
         >
           {isMuted ? '🔇' : '🔊'}
         </button>
@@ -78,12 +101,13 @@ export default function Overlay() {
           className={`hud-btn ${showSettings ? 'active' : ''}`}
           onClick={() => setShowSettings(!showSettings)}
           aria-label="Settings"
+          title="Settings"
         >
           ⚙️
         </button>
       </div>
 
-      {/* Settings panel */}
+      {/* ═══ Settings Panel (centered modal) ═══ */}
       {showSettings && (
         <>
           <div className="settings-panel-backdrop" onClick={() => setShowSettings(false)} />
@@ -93,13 +117,14 @@ export default function Overlay() {
               <button className="sp-close" onClick={() => setShowSettings(false)}>✕</button>
             </div>
 
+            {/* Time of day */}
             <div className="sp-section">
               <div className="sp-label">
                 Time of Day
                 <span className="sp-value">{timeOverride !== null ? formatTime() : 'Real time'}</span>
               </div>
               <div className="sp-row">
-                <span className="sp-icon">🌙</span>
+                <span className="sp-icon">🌅</span>
                 <input
                   type="range" min="0" max="24" step="0.25"
                   value={timeOverride ?? 12}
@@ -108,16 +133,22 @@ export default function Overlay() {
                 />
                 <span className="sp-icon">🌙</span>
               </div>
-              <button className="sp-reset" onClick={() => setTimeOverride(null)}>Reset to real time</button>
+              <button className="sp-reset" onClick={() => setTimeOverride(null)}>
+                Reset to real time
+              </button>
             </div>
 
+            {/* Weather */}
             <div className="sp-section">
               <div className="sp-label">Weather</div>
               <div className="sp-weather-grid">
                 {WEATHER_OPTIONS.map((opt) => (
                   <button
                     key={opt.label}
-                    className={`sp-weather-btn ${(weatherOverride === opt.value) || (opt.value === null && weatherOverride === null) ? 'active' : ''}`}
+                    className={`sp-weather-btn ${
+                      (weatherOverride === opt.value) ||
+                      (opt.value === null && weatherOverride === null) ? 'active' : ''
+                    }`}
                     onClick={() => setWeatherOverride(opt.value)}
                   >
                     <span>{opt.emoji}</span>
@@ -127,6 +158,7 @@ export default function Overlay() {
               </div>
             </div>
 
+            {/* Quality */}
             <div className="sp-section">
               <div className="sp-label">Graphics Quality</div>
               <div className="sp-quality-row">
@@ -142,6 +174,7 @@ export default function Overlay() {
               </div>
             </div>
 
+            {/* Reduce motion */}
             <div className="sp-section sp-toggle-row">
               <span className="sp-label" style={{ marginBottom: 0 }}>Reduce Motion</span>
               <button

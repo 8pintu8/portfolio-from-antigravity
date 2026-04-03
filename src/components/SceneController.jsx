@@ -5,6 +5,7 @@ import useStore from '../store/useStore';
 import { getUserLocation } from '../utils/geolocation';
 import { fetchWeather } from '../utils/weather';
 import { getSunPositionVector, getTimeOfDayFactor, getSkyParameters } from '../utils/sunCalc';
+import { PROJECTS } from '../data/portfolio';
 
 import WalkController from './balcony/WalkController';
 import BalconyStructure from './balcony/BalconyStructure';
@@ -27,32 +28,9 @@ import ShootingStars from './extras/ShootingStars';
 import DistantCityLights from './extras/DistantCityLights';
 import SoundscapeManager from './audio/SoundscapeManager';
 
-const PORTFOLIO_ITEMS = [
-  {
-    id: 'product-design',
-    title: 'Product Design Collection',
-    description: 'A curated series of industrial and consumer product designs — exploring the intersection of form, function, and material innovation.',
-    category: 'Product Design',
-    position: [-2.5, 0, -1.5],
-    color: '#FF9F6B',
-  },
-  {
-    id: 'kinetic-sculpture',
-    title: 'Kinetic Sculptures',
-    description: 'Mechanical art pieces that transform motion into visual poetry. Each sculpture explores the rhythmic language of gears, pendulums, and balanced forces.',
-    category: 'Kinetic Art',
-    position: [1.8, 0, -2],
-    color: '#6BC5FF',
-  },
-  {
-    id: 'research-papers',
-    title: 'Research & Publications',
-    description: 'Academic research spanning computational design, human-computer interaction, and the philosophy of creative technology.',
-    category: 'Research',
-    position: [3.5, 0, 1.5],
-    color: '#A8FFD4',
-  },
-];
+// Portfolio items from centralized data — edit in src/data/portfolio.js
+// Only items with a `position` field get a 3D representation
+const PORTFOLIO_ITEMS = PROJECTS.filter((p) => p.position);
 
 export default function SceneController() {
   const setSunPosition = useStore((s) => s.setSunPosition);
@@ -82,9 +60,13 @@ export default function SceneController() {
     setIsNight(getSkyParameters(d, lat, lon).isNight);
   };
 
+  // Apply weather override — preserve real data, only swap the condition
   useEffect(() => {
     if (weatherOverride && liveWeather) {
       setWeather({ ...liveWeather, condition: weatherOverride });
+    } else if (weatherOverride) {
+      // No live data yet — use defaults with override condition
+      setWeather({ condition: weatherOverride, temperature: 25, humidity: 50, windSpeed: 3, cloudCover: 0 });
     } else if (liveWeather) {
       setWeather(liveWeather);
     }
@@ -113,16 +95,22 @@ export default function SceneController() {
   useEffect(() => {
     if (!userLocation) return;
     const id = setInterval(async () => {
-      setLiveWeather(await fetchWeather(userLocation.lat, userLocation.lon));
+      try {
+        const w = await fetchWeather(userLocation.lat, userLocation.lon);
+        setLiveWeather(w);
+      } catch (err) {
+        console.warn('Weather refresh failed:', err);
+      }
     }, 600000);
     return () => clearInterval(id);
   }, [userLocation, setLiveWeather]);
 
   useFrame(({ clock }) => {
     if (!userLocation || timeOverride !== null) return;
-    const t = clock.getElapsedTime();
-    if (t - lastUpdate.current > 30) {
-      lastUpdate.current = t;
+    const now = Date.now();
+    if (now - lastUpdate.current > 30000) {
+      lastUpdate.current = now;
+
       computeSun(new Date(), userLocation.lat, userLocation.lon);
     }
   });
