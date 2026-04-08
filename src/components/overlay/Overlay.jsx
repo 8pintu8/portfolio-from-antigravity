@@ -26,6 +26,8 @@ const WEATHER_OPTIONS = [
 export default function Overlay({ onOpenPortfolio }) {
   const isMuted = useStore((s) => s.isMuted);
   const toggleMute = useStore((s) => s.toggleMute);
+  const masterVolume = useStore((s) => s.masterVolume);
+  const setMasterVolume = useStore((s) => s.setMasterVolume);
   const qualityLevel = useStore((s) => s.qualityLevel);
   const setQualityLevel = useStore((s) => s.setQualityLevel);
   const setAutoQuality = useStore((s) => s.setAutoQuality);
@@ -136,6 +138,27 @@ export default function Overlay({ onOpenPortfolio }) {
               <button className="sp-reset" onClick={() => setTimeOverride(null)}>
                 Reset to real time
               </button>
+            </div>
+
+            {/* Audio Volume */}
+            <div className="sp-section">
+              <div className="sp-label">
+                Master Volume
+                <span className="sp-value">{Math.round(masterVolume * 100)}%</span>
+              </div>
+              <div className="sp-row">
+                <span className="sp-icon">🔈</span>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={masterVolume}
+                  onChange={(e) => {
+                    setMasterVolume(parseFloat(e.target.value));
+                    if (isMuted && parseFloat(e.target.value) > 0) toggleMute();
+                  }}
+                  className="sp-slider"
+                />
+                <span className="sp-icon">🔊</span>
+              </div>
             </div>
 
             {/* Weather */}

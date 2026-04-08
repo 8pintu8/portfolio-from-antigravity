@@ -6,17 +6,21 @@ export default function PostEffects() {
   const qualityLevel = useStore((s) => s.qualityLevel);
   const isNight = useStore((s) => s.isNight);
 
-  // Disable all post-processing on low quality
-  if (qualityLevel === 'low') return null;
+  // We removed dynamic luminanceThresholds because changing them at runtime causes Bloom 
+  // shaders to recompile, resulting in the "Sudden Flash Glitch".
+  // Returning null on 'low' quality also rebuilds the renderer completely, causing a Freeze.
+  // We keep the composer always active with static settings.
 
   return (
-    <EffectComposer multisampling={qualityLevel === 'high' ? 4 : 0}>
-      <Bloom
-        luminanceThreshold={isNight ? 0.2 : 0.6}
-        luminanceSmoothing={0.4}
-        intensity={isNight ? 1.2 : 0.4}
-        mipmapBlur
-      />
+    <EffectComposer multisampling={4}>
+      {qualityLevel !== 'low' && (
+        <Bloom
+          luminanceThreshold={0.5}
+          luminanceSmoothing={0.4}
+          intensity={1.0}
+          mipmapBlur
+        />
+      )}
       <Vignette
         offset={0.3}
         darkness={isNight ? 0.7 : 0.35}

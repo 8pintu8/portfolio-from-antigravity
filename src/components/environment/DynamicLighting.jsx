@@ -37,6 +37,7 @@ export default function DynamicLighting() {
   }, [isNight, timeOfDay]);
 
   const shadowMapSize = qualityLevel === 'high' ? 2048 : qualityLevel === 'medium' ? 1024 : 512;
+  // Dynamic shadows removed to prevent recreation freezing
 
   return (
     <>
@@ -44,9 +45,8 @@ export default function DynamicLighting() {
         position={sunPosition}
         color={lightConfig.directionalColor}
         intensity={lightConfig.directionalIntensity}
-        castShadow={qualityLevel !== 'low'}
-        shadow-mapSize-width={shadowMapSize}
-        shadow-mapSize-height={shadowMapSize}
+        castShadow={true}
+        shadow-mapSize={[1024, 1024]}
         shadow-camera-near={0.5}
         shadow-camera-far={80}
         shadow-camera-left={-30}

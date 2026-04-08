@@ -15,6 +15,9 @@ import PortfolioObject from './balcony/PortfolioObject';
 import ProductDesign from './balcony/items/ProductDesign';
 import KineticSculpture from './balcony/items/KineticSculpture';
 import ResearchPaper from './balcony/items/ResearchPaper';
+import AboutModel from './balcony/items/AboutModel';
+import DiaryModel from './balcony/items/DiaryModel';
+import ContactModel from './balcony/items/ContactModel';
 import DynamicSky from './environment/DynamicSky';
 import DynamicLighting from './environment/DynamicLighting';
 import Campus from './environment/Campus';
@@ -74,6 +77,11 @@ export default function SceneController() {
 
   useEffect(() => {
     let dead = false;
+
+    // PREVENT FLASH GLITCH: Initialize sun immediately using default/approx location (Bhopal)
+    // so that isNight/Bloom evaluate correctly on frame 1 without flashing bright later.
+    computeSun(new Date(), 23.2599, 77.4126); 
+
     (async () => {
       const loc = await getUserLocation();
       if (dead) return;
@@ -148,6 +156,9 @@ export default function SceneController() {
             {item.id === 'product-design' && <ProductDesign />}
             {item.id === 'kinetic-sculpture' && <KineticSculpture />}
             {item.id === 'research-papers' && <ResearchPaper />}
+            {item.id === 'about-trigger' && <AboutModel />}
+            {item.id === 'diary-trigger' && <DiaryModel />}
+            {item.id === 'contact-trigger' && <ContactModel />}
           </PortfolioObject>
         </group>
       ))}

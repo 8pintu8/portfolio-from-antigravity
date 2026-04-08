@@ -138,7 +138,15 @@ export default function ContactSection({ contact, social }) {
               rel="noopener noreferrer"
               className="cs-link"
             >
-              <span className="cs-icon">{s.icon}</span>
+              <span className="cs-icon">
+                {s.svg ? (
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                    <path d={s.svg} />
+                  </svg>
+                ) : (
+                  s.icon
+                )}
+              </span>
               <span>{s.platform}</span>
             </a>
           ))}

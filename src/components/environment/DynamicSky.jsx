@@ -96,7 +96,7 @@ export default function DynamicSky() {
     return base;
   }, [weather.condition]);
 
-  const starsCount = qualityLevel === 'low' ? 1000 : qualityLevel === 'medium' ? 3000 : 5000;
+  const starsCount = 3000; // Static to prevent Re-creation freeze 
 
   return (
     <>

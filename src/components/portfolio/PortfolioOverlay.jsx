@@ -12,7 +12,8 @@
  *   - To add a new tab, add to the TABS array and create a section component
  */
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
+import useStore from '../../store/useStore';
 import { ABOUT, PROJECTS, SKILLS, SOCIAL, CONTACT, SITE } from '../../data/portfolio';
 import { DIARY_ENTRIES, DIARY_ENTRY_TYPES } from '../../data/diary';
 import ProjectCard from './ProjectCard';
@@ -29,7 +30,8 @@ const TABS = [
 ];
 
 export default function PortfolioOverlay({ isOpen, onClose }) {
-  const [activeTab, setActiveTab] = useState('about');
+  const activeTab = useStore((s) => s.activePortfolioTab);
+  const setActiveTab = useStore((s) => s.setActivePortfolioTab);
 
   // Close on Escape key
   useEffect(() => {
@@ -125,7 +127,13 @@ export default function PortfolioOverlay({ isOpen, onClose }) {
                 className="pp-social-link"
                 title={s.platform}
               >
-                {s.icon}
+                {s.svg ? (
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                    <path d={s.svg} />
+                  </svg>
+                ) : (
+                  s.icon
+                )}
               </a>
             ))}
           </div>

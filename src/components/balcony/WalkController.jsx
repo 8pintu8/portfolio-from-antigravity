@@ -4,30 +4,38 @@
  * ╚══════════════════════════════════════════════════════════════════╝
  *
  * HOW IT WORKS:
- *   Desktop:  Click-drag on canvas to look around. WASD / Arrow keys to walk.
- *   Mobile:   Single-finger drag to pan the camera. No keyboard needed.
- *   Both:     Click (without dragging) triggers R3F's normal raycasting,
- *             so PortfolioObject onClick handlers fire naturally.
+ *   Desktop:  Click-drag to look. WASD / Arrow keys to walk.
+ *   Mobile:   Two-zone touch system:
+ *             - Left half of screen  = virtual joystick (move)
+ *             - Right half of screen = drag to look around
+ *             - Tap anywhere = object interaction
  *
- * CONTROLS:
- *   Mouse drag / Touch drag  →  Rotate camera (look around)
- *   WASD / Arrow keys        →  Walk relative to camera heading
- *   Shift                    →  Run (faster speed)
- *   C                        →  Toggle crouch (lower eye-height, slower)
+ * CONTROLS (Desktop):
+ *   Mouse drag         →  Rotate camera (INVERTED X & Y)
+ *   WASD / Arrow keys  →  Walk relative to camera heading
+ *   Shift              →  Run (faster speed)
+ *   C (hold)           →  Crouch (lower eye-height, only while held)
+ *
+ * CONTROLS (Mobile):
+ *   Left-half drag     →  Move (like a joystick, relative to camera)
+ *   Right-half drag    →  Look around (INVERTED)
+ *   Tap                →  Interact with 3D objects
+ *
+ * AXIS INVERSION:
+ *   Both X and Y axes are inverted for look controls.
+ *   Drag right → camera looks LEFT. Drag down → camera looks UP.
+ *   This applies to BOTH desktop mouse and mobile touch.
+ *
+ * NO AUTO-ROTATION:
+ *   The camera never moves unless the user provides input.
  *
  * HOW TO EDIT:
- *   - Change WALK_SPEED, RUN_SPEED, CROUCH_SPEED below to adjust movement feel
+ *   - Change WALK_SPEED, RUN_SPEED, CROUCH_SPEED to adjust movement
  *   - Change BOUNDS to expand/shrink the walkable area
- *   - Add new furniture collision boxes to the COLLIDERS array
- *   - Change LOOK_SPEED to make camera rotation faster/slower
- *   - Change EYE_HEIGHT / CROUCH_HEIGHT to adjust camera vertical position
- *
- * MOBILE BEHAVIOR:
- *   On touch devices, `isMobile` auto-detects and enables:
- *   - Gentle auto-orbit so the scene doesn't feel static
- *   - Single-finger drag rotates the camera
- *   - Tap (without drag) triggers object clicks via R3F
- *   - No on-screen joystick — clean, intuitive
+ *   - Add collision boxes to COLLIDERS array
+ *   - Change LOOK_SPEED for faster/slower camera rotation
+ *   - Change EYE_HEIGHT / CROUCH_HEIGHT for camera position
+ *   - Set INVERT_X / INVERT_Y to false to un-invert an axis
  */
 
 import { useRef, useEffect, useMemo } from 'react';
@@ -54,12 +62,23 @@ const CROUCH_HEIGHT = 1.05;
 /** Mouse/touch look sensitivity (radians per pixel of drag) */
 const LOOK_SPEED = 0.003;
 
+/** Mobile look sensitivity (slightly lower for touch precision) */
+const MOBILE_LOOK_SPEED = 0.004;
+
+/** Mobile move sensitivity (joystick-style, pixels to speed ratio) */
+const MOBILE_MOVE_SENSITIVITY = 0.015;
+
 /** Head bob (walking animation) */
 const HEAD_BOB_SPEED = 9;
 const HEAD_BOB_AMOUNT = 0.02;
 
-/** Mobile auto-orbit speed (radians per second, very gentle) */
-const AUTO_ORBIT_SPEED = 0.04;
+/**
+ * AXIS INVERSION — set to true to invert
+ * When true: drag right → look left, drag down → look up
+ * Applies to ALL devices (desktop, laptop, mobile, tablet)
+ */
+const INVERT_X = true;
+const INVERT_Y = true;
 
 // ─────────────────────────────────────────────
 // COLLISION BOXES — add new furniture here
@@ -68,14 +87,14 @@ const AUTO_ORBIT_SPEED = 0.04;
 //   x, z    = center position on the floor
 //   hw      = half-width along X axis
 //   hd      = half-depth along Z axis
-//
-// HOW TO ADD: when you place a new mesh in the scene,
-// add an entry here with its position and approximate size.
 
 const COLLIDERS = [
   { x: -2.5, z: -1.5, hw: 0.45, hd: 0.45 },   // Product design pedestal
   { x: 1.8,  z: -2.0, hw: 0.45, hd: 0.45 },   // Kinetic sculpture pedestal
   { x: 3.5,  z: 1.5,  hw: 0.45, hd: 0.45 },   // Research pedestal
+  { x: -3.5, z: 2.0,  hw: 0.45, hd: 0.45 },   // About pedestal
+  { x: -1.5, z: 3.2,  hw: 0.45, hd: 0.45 },   // Diary pedestal
+  { x: 2.5,  z: 3.2,  hw: 0.45, hd: 0.45 },   // Contact pedestal
   { x: -4.0, z: 2.5,  hw: 0.8,  hd: 0.35 },   // Wooden bench
   { x: -1.0, z: -0.5, hw: 0.35, hd: 0.35 },   // Side table
   { x: 4.2,  z: 0.0,  hw: 0.3,  hd: 0.45 },   // Bookshelf
@@ -109,35 +128,44 @@ export default function WalkController() {
 
   // Currently pressed keys (keyed by e.code)
   const keys = useRef({});
-  const crouching = useRef(false);
   const bobPhase = useRef(0);
   const eyeH = useRef(EYE_HEIGHT);
 
-  // Drag-to-look state
+  // Drag-to-look state (desktop)
   const dragging = useRef(false);
   const lastDragPos = useRef({ x: 0, y: 0 });
   const dragMoved = useRef(false);
+
+  // Mobile touch state
+  const moveTouch = useRef(null);      // Left-half finger (movement)
+  const lookTouch = useRef(null);      // Right-half finger (look)
+  const moveTouchStart = useRef({ x: 0, y: 0 });
+  const lookTouchLast = useRef({ x: 0, y: 0 });
+  const mobileMove = useRef({ x: 0, z: 0 }); // Normalized movement vector
+  const lookTouchMoved = useRef(false);
 
   // Store bindings
   const setIsDragging = useStore((s) => s.setIsDragging);
   const reducedMotion = useStore((s) => s.reducedMotion);
 
-  // Detect touch device (for auto-orbit on mobile)
+  // Detect touch device
   const isMobile = useMemo(() => {
     return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   }, []);
 
-  // ── Initialize camera position ──
+  // ── Initialize camera position — looking STRAIGHT AHEAD ──
   useEffect(() => {
     camera.position.set(0, EYE_HEIGHT, 2);
-    euler.current.setFromQuaternion(camera.quaternion);
+    // Set euler to (0, 0, 0) = looking horizontally forward along -Z
+    euler.current.set(0, 0, 0, 'YXZ');
+    camera.quaternion.setFromEuler(euler.current);
   }, [camera]);
 
-  // ── Keyboard listeners (desktop only) ──
+  // ── Keyboard listeners (desktop) ──
   useEffect(() => {
     const down = (e) => {
       keys.current[e.code] = true;
-      if (e.code === 'KeyC') crouching.current = !crouching.current;
+      // Crouch is HOLD, not toggle — handled in useFrame via keys.current
     };
     const up = (e) => {
       keys.current[e.code] = false;
@@ -150,7 +178,7 @@ export default function WalkController() {
     };
   }, []);
 
-  // ── Mouse drag-to-look (desktop) ──
+  // ── Mouse drag-to-look (desktop) — INVERTED AXES ──
   useEffect(() => {
     const canvas = gl.domElement;
 
@@ -164,26 +192,26 @@ export default function WalkController() {
     const onMove = (e) => {
       if (!dragging.current) return;
 
-      // Calculate how far mouse moved since last frame
       const deltaX = e.clientX - lastDragPos.current.x;
       const deltaY = e.clientY - lastDragPos.current.y;
 
-      // Only count as drag if moved more than 3px total (avoids accidental drags)
+      // Only count as drag if moved more than 3px (avoids accidental drags)
       if (!dragMoved.current && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
         dragMoved.current = true;
         setIsDragging(true);
       }
 
       if (dragMoved.current) {
-        // Rotate camera based on mouse delta
-        euler.current.y -= deltaX * LOOK_SPEED;
-        euler.current.x -= deltaY * LOOK_SPEED;
+        // Apply inversion: positive = inverted direction
+        const xSign = INVERT_X ? 1 : -1;
+        const ySign = INVERT_Y ? 1 : -1;
+        euler.current.y += deltaX * LOOK_SPEED * xSign;
+        euler.current.x += deltaY * LOOK_SPEED * ySign;
         // Clamp vertical look to prevent flipping
         euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
         camera.quaternion.setFromEuler(euler.current);
       }
 
-      // Update for next frame's delta calculation
       lastDragPos.current = { x: e.clientX, y: e.clientY };
     };
 
@@ -204,48 +232,78 @@ export default function WalkController() {
     };
   }, [camera, gl.domElement, setIsDragging]);
 
-  // ── Touch drag-to-look (mobile) ──
+  // ── Touch controls (mobile) — TWO-ZONE: left=move, right=look ──
   useEffect(() => {
     const canvas = gl.domElement;
-    let touchId = null;
-    let lastTouch = { x: 0, y: 0 };
-    let touchStartTime = 0;
+    const halfWidth = () => window.innerWidth / 2;
 
     const onStart = (e) => {
-      if (touchId !== null) return; // Only track one finger
-      const t = e.changedTouches[0];
-      touchId = t.identifier;
-      lastTouch = { x: t.clientX, y: t.clientY };
-      touchStartTime = Date.now();
-      dragMoved.current = false;
+      for (const t of e.changedTouches) {
+        if (t.clientX < halfWidth() && moveTouch.current === null) {
+          // LEFT HALF → movement joystick
+          moveTouch.current = t.identifier;
+          moveTouchStart.current = { x: t.clientX, y: t.clientY };
+          mobileMove.current = { x: 0, z: 0 };
+        } else if (t.clientX >= halfWidth() && lookTouch.current === null) {
+          // RIGHT HALF → look camera
+          lookTouch.current = t.identifier;
+          lookTouchLast.current = { x: t.clientX, y: t.clientY };
+          lookTouchMoved.current = false;
+        }
+      }
     };
 
     const onMoveT = (e) => {
       for (const t of e.changedTouches) {
-        if (t.identifier !== touchId) continue;
-        const dx = t.clientX - lastTouch.x;
-        const dy = t.clientY - lastTouch.y;
-
-        if (!dragMoved.current && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
-          dragMoved.current = true;
-          setIsDragging(true);
+        // ── Movement touch (left side) ──
+        if (t.identifier === moveTouch.current) {
+          const dx = t.clientX - moveTouchStart.current.x;
+          const dy = t.clientY - moveTouchStart.current.y;
+          // Normalize to -1..1 range (deadzone of 10px)
+          const mag = Math.sqrt(dx * dx + dy * dy);
+          if (mag > 10) {
+            const norm = Math.min(mag, 100) / 100; // Cap at 100px radius
+            mobileMove.current = {
+              x: (dx / mag) * norm,
+              z: (dy / mag) * norm,
+            };
+          } else {
+            mobileMove.current = { x: 0, z: 0 };
+          }
         }
 
-        if (dragMoved.current) {
-          euler.current.y -= dx * LOOK_SPEED;
-          euler.current.x -= dy * LOOK_SPEED;
-          euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
-          camera.quaternion.setFromEuler(euler.current);
-        }
+        // ── Look touch (right side) — INVERTED ──
+        if (t.identifier === lookTouch.current) {
+          const dx = t.clientX - lookTouchLast.current.x;
+          const dy = t.clientY - lookTouchLast.current.y;
 
-        lastTouch = { x: t.clientX, y: t.clientY };
+          if (!lookTouchMoved.current && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+            lookTouchMoved.current = true;
+            setIsDragging(true);
+          }
+
+          if (lookTouchMoved.current) {
+            const xSign = INVERT_X ? 1 : -1;
+            const ySign = INVERT_Y ? 1 : -1;
+            euler.current.y += dx * MOBILE_LOOK_SPEED * xSign;
+            euler.current.x += dy * MOBILE_LOOK_SPEED * ySign;
+            euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
+            camera.quaternion.setFromEuler(euler.current);
+          }
+
+          lookTouchLast.current = { x: t.clientX, y: t.clientY };
+        }
       }
     };
 
     const onEnd = (e) => {
       for (const t of e.changedTouches) {
-        if (t.identifier === touchId) {
-          touchId = null;
+        if (t.identifier === moveTouch.current) {
+          moveTouch.current = null;
+          mobileMove.current = { x: 0, z: 0 };
+        }
+        if (t.identifier === lookTouch.current) {
+          lookTouch.current = null;
           setTimeout(() => setIsDragging(false), 60);
         }
       }
@@ -254,45 +312,61 @@ export default function WalkController() {
     canvas.addEventListener('touchstart', onStart, { passive: true });
     canvas.addEventListener('touchmove', onMoveT, { passive: true });
     canvas.addEventListener('touchend', onEnd);
+    canvas.addEventListener('touchcancel', onEnd);
 
     return () => {
       canvas.removeEventListener('touchstart', onStart);
       canvas.removeEventListener('touchmove', onMoveT);
       canvas.removeEventListener('touchend', onEnd);
+      canvas.removeEventListener('touchcancel', onEnd);
     };
   }, [camera, gl.domElement, setIsDragging]);
 
-  // ── Per-frame update: movement + head bob + auto-orbit ──
+  // ── Per-frame update: movement + head bob ──
   useFrame((_, delta) => {
     const k = keys.current;
     const wk = k.KeyW || k.ArrowUp;
     const sk = k.KeyS || k.ArrowDown;
     const ak = k.KeyA || k.ArrowLeft;
     const dk = k.KeyD || k.ArrowRight;
-    const run = (k.ShiftLeft || k.ShiftRight) && !crouching.current;
-    const moving = wk || sk || ak || dk;
+    const run = (k.ShiftLeft || k.ShiftRight);
+
+    // Crouch is HOLD — only active while C is held down
+    const crouching = k.KeyC || false;
+
+    const kbMoving = wk || sk || ak || dk;
+    const mobileMoving = Math.abs(mobileMove.current.x) > 0.01 || Math.abs(mobileMove.current.z) > 0.01;
+    const moving = kbMoving || mobileMoving;
 
     // ── Smooth height transition (standing ↔ crouching) ──
-    const targetH = crouching.current ? CROUCH_HEIGHT : EYE_HEIGHT;
+    const targetH = crouching ? CROUCH_HEIGHT : EYE_HEIGHT;
     eyeH.current += (targetH - eyeH.current) * 0.1;
 
     if (moving) {
-      // ── WASD movement (desktop) ──
-      const speed = crouching.current ? CROUCH_SPEED : run ? RUN_SPEED : WALK_SPEED;
+      const speed = crouching ? CROUCH_SPEED : run ? RUN_SPEED : WALK_SPEED;
 
-      // Get camera forward vector projected onto XZ plane
+      // Get camera forward/right vectors projected onto XZ plane
       const fwd = new THREE.Vector3();
       camera.getWorldDirection(fwd);
       fwd.y = 0;
       fwd.normalize();
       const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
 
-      // Combine input
       const move = new THREE.Vector3();
-      if (wk) move.add(fwd);
-      if (sk) move.sub(fwd);
-      if (dk) move.add(right);
-      if (ak) move.sub(right);
+
+      if (kbMoving) {
+        // ── Desktop WASD movement ──
+        if (wk) move.add(fwd);
+        if (sk) move.sub(fwd);
+        if (dk) move.add(right);
+        if (ak) move.sub(right);
+      } else if (mobileMoving) {
+        // ── Mobile joystick movement ──
+        // mobileMove.x = left/right, mobileMove.z = forward/backward
+        move.addScaledVector(right, mobileMove.current.x);
+        move.addScaledVector(fwd, -mobileMove.current.z); // Negative because drag-down = move forward
+      }
+
       move.normalize().multiplyScalar(speed * delta);
 
       // Apply bounds clamping
@@ -304,9 +378,9 @@ export default function WalkController() {
         camera.position.x = nx;
         camera.position.z = nz;
       } else if (!collides(nx, camera.position.z)) {
-        camera.position.x = nx; // Slide along X
+        camera.position.x = nx;
       } else if (!collides(camera.position.x, nz)) {
-        camera.position.z = nz; // Slide along Z
+        camera.position.z = nz;
       }
 
       // ── Head bob animation ──
@@ -321,15 +395,9 @@ export default function WalkController() {
       // ── Idle — settle to standing height ──
       camera.position.y += (eyeH.current - camera.position.y) * 0.12;
       bobPhase.current = 0;
-
-      // ── Mobile auto-orbit (gentle rotation when idle) ──
-      if (isMobile && !dragging.current && !reducedMotion) {
-        euler.current.y += AUTO_ORBIT_SPEED * delta;
-        camera.quaternion.setFromEuler(euler.current);
-      }
+      // NO auto-orbit — camera only moves on user input
     }
   });
 
-  // This component is pure logic — no JSX elements rendered
   return null;
 }

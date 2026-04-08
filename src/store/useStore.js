@@ -28,8 +28,6 @@ const useStore = create((set) => ({
   // ── Quality ──
   qualityLevel: 'high',
   setQualityLevel: (q) => set({ qualityLevel: q }),
-  autoQuality: true,
-  setAutoQuality: (v) => set({ autoQuality: v }),
   reducedMotion: false,
   setReducedMotion: (v) => set({ reducedMotion: v }),
 
@@ -37,6 +35,8 @@ const useStore = create((set) => ({
   isMuted: true,
   setIsMuted: (v) => set({ isMuted: v }),
   toggleMute: () => set((s) => ({ isMuted: !s.isMuted })),
+  masterVolume: 0.5,
+  setMasterVolume: (v) => set({ masterVolume: v }),
 
   // ── Interaction ──
   activeObject: null,
@@ -44,6 +44,12 @@ const useStore = create((set) => ({
   clearActiveObject: () => set({ activeObject: null }),
   hoveredObject: null,
   setHoveredObject: (id) => set({ hoveredObject: id }),
+
+  // ── Portfolio Overlay State ──
+  portfolioOpen: false,
+  setPortfolioOpen: (v) => set({ portfolioOpen: v }),
+  activePortfolioTab: 'about',
+  setActivePortfolioTab: (v) => set({ activePortfolioTab: v }),
 
   // ── Drag state (used by WalkController to suppress clicks during drag) ──
   isDragging: false,

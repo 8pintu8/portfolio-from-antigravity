@@ -7,24 +7,9 @@
 const FALLBACK = { lat: 23.2599, lon: 77.4126, city: 'Bhopal', country: 'India' };
 
 export async function getUserLocation() {
-  // Try browser geolocation first
-  try {
-    const pos = await new Promise((resolve, reject) => {
-      if (!navigator.geolocation) reject(new Error('No geolocation'));
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        timeout: 8000,
-        enableHighAccuracy: false,
-      });
-    });
-
-    const { latitude: lat, longitude: lon } = pos.coords;
-
-    // Try reverse geocode for city name
-
-    return { lat, lon, city: 'Your Location', country: '' };
-  } catch (geoErr) {
-    console.log('Browser geolocation denied/unavailable, trying IP...');
-  }
+  // Note: We intentionally skip navigator.geolocation here because asking for
+  // location permissions aggressively on page load causes a browser Violation warning
+  // and is poor UX for a portfolio. We rely entirely on silent IP-based resolution.
 
   // Try IP-based geolocation
   try {

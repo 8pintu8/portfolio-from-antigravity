@@ -1,0 +1,5090 @@
+
+
+## Project Structure
+
+```
+src/
+├── data/                   ← ⭐ EDIT THESE to update your content
+│   ├── portfolio.js        ← Projects, bio, skills, social links, contact
+│   └── diary.js            ← Digital diary / scrapbook entries
+│
+├── config/
+│   └── theme.js            ← Color palettes (warmTerra, coolMidnight, forestMoss)
+│
+├── store/
+│   └── useStore.js         ← Zustand state management
+│
+├── utils/
+│   ├── geolocation.js      ← Browser → IP → Bhopal fallback
+│   ├── weather.js          ← Open-Meteo API (free, no key)
+│   └── sunCalc.js          ← Real sun position from lat/lon
+│
+├── components/
+│   ├── SceneController.jsx ← 3D scene orchestrator
+│   ├── balcony/             ← Balcony structure, furniture, portfolio objects
+│   │   ├── WalkController   ← Camera movement (drag-to-look + WASD)
+│   │   ├── BalconyStructure ← Floor, railings, walls
+│   │   ├── CozyElements     ← Plants, bench, lights, bookshelf
+│   │   ├── PortfolioObject  ← Interactive 3D items
+│   │   ├── DisplayPedestal  ← Glowing pedestals
+│   │   └── items/           ← 3D representations (ProductDesign, etc.)
+│   ├── environment/         ← Sky, lighting, campus, weather particles
+│   ├── horizon/             ← Terrain, atmospheric fog
+│   ├── extras/              ← Fireflies, shooting stars, city lights
+│   ├── audio/               ← Procedural soundscape (Web Audio API)
+│   ├── overlay/             ← HTML HUD, loading screen, settings
+│   ├── ui/                  ← Info panel, navigation orbs
+│   └── portfolio/           ← Portfolio overlay (About, Projects, Diary, Contact)
+│
+├── App.jsx                  ← Root component
+├── main.jsx                 ← Entry point
+└── index.css                ← All styles (mobile-first, responsive)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useEffect, useRef } from 'react';
+import useStore from '../../store/useStore';
+
+/**
+ * Procedural ambient soundscape using Web Audio API.
+ * No external audio files needed — generates tones programmatically.
+ */
+export default function SoundscapeManager() {
+  const isMuted = useStore((s) => s.isMuted);
+  const isNight = useStore((s) => s.isNight);
+  const weather = useStore((s) => s.weather);
+  const audioCtxRef = useRef(null);
+  const gainRef = useRef(null);
+  const nodesRef = useRef([]);
+
+  useEffect(() => {
+    // Create AudioContext on first user interaction
+    const initAudio = () => {
+      if (audioCtxRef.current) return;
+
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtxRef.current = ctx;
+
+        // Master gain
+        const gain = ctx.createGain();
+        gain.gain.value = isMuted ? 0 : 0.15;
+        gain.connect(ctx.destination);
+        gainRef.current = gain;
+
+        // Ambient drone — a soft low-frequency oscillator
+        const drone = ctx.createOscillator();
+        drone.type = 'sine';
+        drone.frequency.value = 80;
+        const droneGain = ctx.createGain();
+        droneGain.gain.value = 0.08;
+        drone.connect(droneGain);
+        droneGain.connect(gain);
+        drone.start();
+        nodesRef.current.push(drone);
+
+        // Soft high-frequency shimmer
+        const shimmer = ctx.createOscillator();
+        shimmer.type = 'sine';
+        shimmer.frequency.value = 440;
+        const shimmerGain = ctx.createGain();
+        shimmerGain.gain.value = 0.02;
+        shimmer.connect(shimmerGain);
+        shimmerGain.connect(gain);
+        shimmer.start();
+        nodesRef.current.push(shimmer);
+
+        // Wind noise via filtered noise buffer
+        const bufferSize = ctx.sampleRate * 2;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = noiseBuffer;
+        noise.loop = true;
+
+        const windFilter = ctx.createBiquadFilter();
+        windFilter.type = 'lowpass';
+        windFilter.frequency.value = 300;
+        windFilter.Q.value = 1;
+
+        const windGain = ctx.createGain();
+        windGain.gain.value = 0.06;
+
+        noise.connect(windFilter);
+        windFilter.connect(windGain);
+        windGain.connect(gain);
+        noise.start();
+        nodesRef.current.push(noise);
+      } catch (err) {
+        console.warn('Audio init failed:', err);
+      }
+    };
+
+    // Wait for user interaction to initialize (browser policy)
+    const events = ['click', 'keydown', 'touchstart'];
+    events.forEach((e) => document.addEventListener(e, initAudio, { once: false }));
+
+    return () => {
+      events.forEach((e) => document.removeEventListener(e, initAudio));
+      nodesRef.current.forEach((node) => {
+        try { node.stop(); } catch {}
+      });
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  // Mute/unmute
+  useEffect(() => {
+    if (gainRef.current && audioCtxRef.current) {
+      const ctx = audioCtxRef.current;
+      gainRef.current.gain.cancelScheduledValues(ctx.currentTime);
+      gainRef.current.gain.linearRampToValueAtTime(
+        isMuted ? 0 : 0.15,
+        ctx.currentTime + 0.5
+      );
+    }
+  }, [isMuted]);
+
+  return null; // Audio-only component
+}
+
+
+
+.
+
+
+
+import { useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+export default function KineticSculpture() {
+  const ring1 = useRef();
+  const ring2 = useRef();
+  const ring3 = useRef();
+  const coreRef = useRef();
+
+  const metalMat = new THREE.MeshStandardMaterial({
+    color: 0x8BA8C4,
+    roughness: 0.2,
+    metalness: 0.9,
+  });
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (ring1.current) ring1.current.rotation.x = t * 0.8;
+    if (ring2.current) ring2.current.rotation.y = t * 1.1;
+    if (ring3.current) ring3.current.rotation.z = t * 0.6;
+    if (coreRef.current) {
+      coreRef.current.rotation.y = t * 1.5;
+      const pulse = 0.4 + Math.sin(t * 3) * 0.15;
+      coreRef.current.material.emissiveIntensity = pulse;
+    }
+  });
+
+  return (
+    <group>
+      {/* Outer ring */}
+      <mesh ref={ring1} material={metalMat} castShadow>
+        <torusGeometry args={[0.35, 0.02, 16, 48]} />
+      </mesh>
+      {/* Middle ring */}
+      <mesh ref={ring2} material={metalMat} castShadow>
+        <torusGeometry args={[0.26, 0.02, 16, 48]} />
+      </mesh>
+      {/* Inner ring */}
+      <mesh ref={ring3} material={metalMat} castShadow>
+        <torusGeometry args={[0.17, 0.015, 16, 48]} />
+      </mesh>
+      {/* Core sphere */}
+      <mesh ref={coreRef} castShadow>
+        <icosahedronGeometry args={[0.08, 1]} />
+        <meshStandardMaterial
+          color={0x6BC5FF}
+          emissive={0x6BC5FF}
+          emissiveIntensity={0.5}
+          roughness={0.1}
+          metalness={0.5}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+
+
+
+
+.
+
+
+
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+export default function ProductDesign() {
+  const groupRef = useRef();
+  const innerRef = useRef();
+
+  const iridescent = useMemo(() => new THREE.MeshPhysicalMaterial({
+    color: 0xE8A87C,
+    roughness: 0.15,
+    metalness: 0.6,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.1,
+    iridescence: 1.0,
+    iridescenceIOR: 1.8,
+  }), []);
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (groupRef.current) groupRef.current.rotation.y = t * 0.4;
+    if (innerRef.current) innerRef.current.rotation.x = t * 0.6;
+  });
+
+  return (
+    <group ref={groupRef}>
+      {/* Outer torus knot */}
+      <mesh material={iridescent} castShadow>
+        <torusKnotGeometry args={[0.28, 0.08, 80, 12, 2, 3]} />
+      </mesh>
+      {/* Inner cube */}
+      <mesh ref={innerRef} castShadow>
+        <boxGeometry args={[0.2, 0.2, 0.2]} />
+        <meshPhysicalMaterial
+          color={0xFF9F6B}
+          roughness={0.1}
+          metalness={0.4}
+          emissive={0xFF9F6B}
+          emissiveIntensity={0.3}
+          transparent
+          opacity={0.85}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+
+
+
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../../store/useStore';
+
+const PARTICLE_COUNT = 40;
+
+export default function ResearchPaper() {
+  const groupRef = useRef();
+  const particlesRef = useRef();
+  const reducedMotion = useStore((s) => s.reducedMotion);
+
+  // Knowledge particles — small floating dots around the book
+  const particlePositions = useMemo(() => {
+    const arr = new Float32Array(PARTICLE_COUNT * 3);
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      arr[i * 3] = (Math.random() - 0.5) * 0.8;
+      arr[i * 3 + 1] = Math.random() * 0.6;
+      arr[i * 3 + 2] = (Math.random() - 0.5) * 0.8;
+    }
+    return arr;
+  }, []);
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (groupRef.current && !reducedMotion) {
+      groupRef.current.rotation.y = Math.sin(t * 0.5) * 0.3;
+    }
+    if (particlesRef.current && !reducedMotion) {
+      const positions = particlesRef.current.geometry.attributes.position.array;
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        positions[i * 3 + 1] += Math.sin(t * 2 + i) * 0.001;
+        if (positions[i * 3 + 1] > 0.8) positions[i * 3 + 1] = -0.1;
+      }
+      particlesRef.current.geometry.attributes.position.needsUpdate = true;
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      {/* Book / document shape */}
+      <mesh castShadow position={[0, 0, 0]}>
+        <boxGeometry args={[0.35, 0.04, 0.45]} />
+        <meshPhysicalMaterial
+          color={0xF5E6D3}
+          roughness={0.6}
+          metalness={0.0}
+          clearcoat={0.3}
+        />
+      </mesh>
+
+      {/* Cover accent line */}
+      <mesh position={[0, 0.021, -0.05]}>
+        <boxGeometry args={[0.25, 0.002, 0.01]} />
+        <meshStandardMaterial color={0xA8FFD4} emissive={0xA8FFD4} emissiveIntensity={0.5} />
+      </mesh>
+
+      {/* Second page underneath */}
+      <mesh position={[0.01, -0.02, 0.01]}>
+        <boxGeometry args={[0.35, 0.03, 0.45]} />
+        <meshStandardMaterial color={0xE8D5C0} roughness={0.7} />
+      </mesh>
+
+      {/* Knowledge particles */}
+      <points ref={particlesRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            count={PARTICLE_COUNT}
+            array={particlePositions}
+            itemSize={3}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          color={0xA8FFD4}
+          size={0.015}
+          transparent
+          opacity={0.7}
+          sizeAttenuation
+        />
+      </points>
+    </group>
+  );
+}
+
+
+
+
+
+
+
+import { useMemo } from 'react';
+import * as THREE from 'three';
+import { theme } from '../../config/theme';
+
+export default function BalconyStructure() {
+  const stoneMat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: 0x8B7D6B,
+    roughness: 0.92,
+    metalness: 0.02,
+  }), []);
+
+  const woodMat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: 0x6B4E37,
+    roughness: 0.85,
+    metalness: 0.0,
+  }), []);
+
+  const darkWoodMat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: 0x3D2B1F,
+    roughness: 0.8,
+    metalness: 0.05,
+  }), []);
+
+  const metalMat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: 0x3A3A3A,
+    roughness: 0.35,
+    metalness: 0.85,
+  }), []);
+
+  const warmMetalMat = useMemo(() => new THREE.MeshStandardMaterial({
+    color: 0xB08D57,
+    roughness: 0.4,
+    metalness: 0.7,
+  }), []);
+
+  // Railing posts along the front and sides
+  const railingPosts = useMemo(() => {
+    const posts = [];
+    // Front railing
+    for (let x = -5.5; x <= 5.5; x += 1.8) {
+      posts.push([x, 0, -3.5]);
+    }
+    // Side railings
+    for (let z = -3.5; z <= 4.5; z += 1.8) {
+      posts.push([-5.5, 0, z]);
+      posts.push([5.5, 0, z]);
+    }
+    return posts;
+  }, []);
+
+  return (
+    <group>
+      {/* ═══════════════════════════════════════
+          FLOOR — offset slightly up to prevent z-fighting
+         ═══════════════════════════════════════ */}
+      {/* Main stone floor */}
+      <mesh receiveShadow position={[0, 0.02, 0.5]}>
+        <boxGeometry args={[12, 0.15, 9]} />
+        <meshStandardMaterial color={0x9B8B7B} roughness={0.88} metalness={0.02} />
+      </mesh>
+
+      {/* Floor tile accent lines */}
+      {[-4, -2, 0, 2, 4].map((x, i) => (
+        <mesh key={`tile-x-${i}`} position={[x, 0.105, 0.5]} receiveShadow>
+          <boxGeometry args={[0.03, 0.01, 9]} />
+          <meshStandardMaterial color={0x7A6B5B} roughness={0.7} />
+        </mesh>
+      ))}
+      {[-2, 0, 2].map((z, i) => (
+        <mesh key={`tile-z-${i}`} position={[0, 0.105, z]} receiveShadow>
+          <boxGeometry args={[12, 0.01, 0.03]} />
+          <meshStandardMaterial color={0x7A6B5B} roughness={0.7} />
+        </mesh>
+      ))}
+
+      {/* Floor edge trim — decorative border along front edge */}
+      <mesh position={[0, 0.05, -3.5]}>
+        <boxGeometry args={[12.2, 0.12, 0.12]} />
+        <meshStandardMaterial color={0x7A6B5B} roughness={0.8} />
+      </mesh>
+
+      {/* ═══════════════════════════════════════
+          RAILING — wrought iron style (Tiny Glade)
+         ═══════════════════════════════════════ */}
+      {/* Railing posts */}
+      {railingPosts.map((pos, i) => (
+        <mesh key={`post-${i}`} position={[pos[0], 0.55, pos[1]]} castShadow material={metalMat}>
+          <cylinderGeometry args={[0.025, 0.03, 1.1, 8]} />
+        </mesh>
+      ))}
+
+      {/* Top rail — front */}
+      <mesh position={[0, 1.1, -3.5]} material={warmMetalMat} castShadow>
+        <boxGeometry args={[12, 0.06, 0.06]} />
+      </mesh>
+      {/* Mid rail — front */}
+      <mesh position={[0, 0.6, -3.5]} material={metalMat}>
+        <boxGeometry args={[12, 0.03, 0.03]} />
+      </mesh>
+      {/* Top rail — left */}
+      <mesh position={[-5.5, 1.1, 0.5]} material={warmMetalMat} castShadow>
+        <boxGeometry args={[0.06, 0.06, 9]} />
+      </mesh>
+      {/* Top rail — right */}
+      <mesh position={[5.5, 1.1, 0.5]} material={warmMetalMat} castShadow>
+        <boxGeometry args={[0.06, 0.06, 9]} />
+      </mesh>
+
+      {/* ═══════════════════════════════════════
+          BACK WALL (the building the balcony is attached to)
+         ═══════════════════════════════════════ */}
+      <mesh position={[0, 2, 5]} receiveShadow castShadow>
+        <boxGeometry args={[13, 5, 0.4]} />
+        <meshStandardMaterial color={0xC4B5A0} roughness={0.9} metalness={0.0} />
+      </mesh>
+
+      {/* Window frame on back wall */}
+      <mesh position={[-3, 2.5, 4.78]}>
+        <boxGeometry args={[1.5, 2, 0.08]} />
+        <meshStandardMaterial color={0x1A3045} roughness={0.3} metalness={0.1} />
+      </mesh>
+      {/* Window frame border — dark wood surround */}
+      <mesh position={[-3, 2.5, 4.76]}>
+        <boxGeometry args={[1.7, 2.2, 0.04]} />
+        <meshStandardMaterial color={0x4A3828} roughness={0.7} />
+      </mesh>
+
+      {/* Second window */}
+      <mesh position={[3, 2.5, 4.78]}>
+        <boxGeometry args={[1.5, 2, 0.08]} />
+        <meshStandardMaterial color={0x1A3045} roughness={0.3} metalness={0.1} />
+      </mesh>
+      <mesh position={[3, 2.5, 4.76]}>
+        <boxGeometry args={[1.7, 2.2, 0.04]} />
+        <meshStandardMaterial color={0x4A3828} roughness={0.7} />
+      </mesh>
+
+      {/* Door frame (center) */}
+      <mesh position={[0, 1.8, 4.78]}>
+        <boxGeometry args={[1.2, 2.8, 0.08]} />
+        <meshStandardMaterial color={0x2A1F14} roughness={0.6} metalness={0.1} />
+      </mesh>
+      <mesh position={[0, 1.8, 4.75]}>
+        <boxGeometry args={[1.4, 3.0, 0.04]} />
+        <meshStandardMaterial color={0x5A4030} roughness={0.7} />
+      </mesh>
+
+      {/* ═══════════════════════════════════════
+          CORNER PILLARS — sturdier, Tiny Glade style
+         ═══════════════════════════════════════ */}
+      {[[-5.5, -3.5], [5.5, -3.5], [-5.5, 4.8], [5.5, 4.8]].map(([x, z], i) => (
+        <group key={`corner-${i}`}>
+          <mesh position={[x, 1.2, z]} castShadow>
+            <boxGeometry args={[0.25, 2.6, 0.25]} />
+            <meshStandardMaterial color={0xA09080} roughness={0.85} />
+          </mesh>
+          {/* Cap */}
+          <mesh position={[x, 2.55, z]}>
+            <boxGeometry args={[0.35, 0.1, 0.35]} />
+            <meshStandardMaterial color={0xB0A090} roughness={0.7} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* ═══════════════════════════════════════
+          UNDERSIDE — the building extends below
+         ═══════════════════════════════════════ */}
+      <mesh position={[0, -2.5, 0.5]}>
+        <boxGeometry args={[12.5, 5, 9.5]} />
+        <meshStandardMaterial color={0xB5A595} roughness={0.95} />
+      </mesh>
+
+      {/* Decorative arch under balcony */}
+      <mesh position={[0, -0.3, -3.7]}>
+        <boxGeometry args={[12.2, 0.4, 0.3]} />
+        <meshStandardMaterial color={0x8A7A6A} roughness={0.8} />
+      </mesh>
+    </group>
+  );
+}
+
+
+
+
+
+
+
+
+/**
+ * ╔════════════════════════════════════════════════════════════════╗
+ * ║  CozyElements.jsx — Warm, lived-in balcony decorations         ║
+ * ╚════════════════════════════════════════════════════════════════╝
+ *
+ * HOW TO EDIT:
+ *   - Add/move plants: change PottedPlant position props
+ *   - Move bench: change the position in the bench <group>
+ *   - String lights: change bulbCount in StringLights component
+ *   - Colors: all color hex values are inline for easy editing
+ *
+ * PERFORMANCE NOTE:
+ *   String lights use emissive materials for all bulbs but only
+ *   3 shared pointLights (not one per bulb). This saves draw calls.
+ */
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+export default function CozyElements() {
+  const timeOfDay = useStore((s) => s.timeOfDay);
+  const showLights = timeOfDay > 0.65 || timeOfDay < 0.35;
+
+  return (
+    <group>
+      {/* ═══════ STRING LIGHTS across the balcony ═══════ */}
+      <StringLights showLights={showLights} />
+
+      {/* ═══════ POTTED PLANTS ═══════ */}
+      {/* Large statement plant — back wall */}
+      <PottedPlant position={[0, 0.1, 3.5]} scale={1.2} />
+      {/* Smaller plants along the railing */}
+      <PottedPlant position={[-4.5, 0.1, -3]} scale={0.7} />
+      <PottedPlant position={[4.5, 0.1, -3]} scale={0.7} />
+      <PottedPlant position={[-5, 0.1, 1]} scale={0.6} />
+      {/* Cascading vines along front railing */}
+      <HangingVine position={[-2, 0.9, -3.5]} />
+      <HangingVine position={[2, 0.9, -3.5]} />
+
+      {/* ═══════ WOODEN BENCH with cushion ═══════ */}
+      <group position={[-4, 0.1, 2.5]}>
+        {/* Seat plank */}
+        <mesh position={[0, 0.35, 0]} castShadow receiveShadow>
+          <boxGeometry args={[1.5, 0.08, 0.55]} />
+          <meshStandardMaterial color={0x6B4E37} roughness={0.8} />
+        </mesh>
+        {/* Legs */}
+        {[[-0.6, -0.2], [-0.6, 0.2], [0.6, -0.2], [0.6, 0.2]].map(([x, z], i) => (
+          <mesh key={i} position={[x, 0.17, z]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.35, 6]} />
+            <meshStandardMaterial color={0x4A3428} roughness={0.7} />
+          </mesh>
+        ))}
+        {/* Terracotta-colored cushion */}
+        <mesh position={[0, 0.42, 0]} castShadow>
+          <boxGeometry args={[1.3, 0.08, 0.45]} />
+          <meshStandardMaterial color={0xC85A4A} roughness={0.95} />
+        </mesh>
+      </group>
+
+      {/* ═══════ SIDE TABLE with lantern ═══════ */}
+      <group position={[-1, 0.1, -0.5]}>
+        {/* Round table top */}
+        <mesh position={[0, 0.55, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.35, 0.35, 0.04, 16]} />
+          <meshStandardMaterial color={0x5A3D2B} roughness={0.75} />
+        </mesh>
+        {/* Metal leg */}
+        <mesh position={[0, 0.27, 0]}>
+          <cylinderGeometry args={[0.04, 0.06, 0.55, 8]} />
+          <meshStandardMaterial color={0x2A2A2A} roughness={0.4} metalness={0.7} />
+        </mesh>
+        {/* Lantern on table */}
+        <Lantern position={[0.1, 0.6, 0.05]} showLight={showLights} />
+      </group>
+
+      {/* ═══════ FLOOR RUG (woven pattern) ═══════ */}
+      <mesh position={[-2.5, 0.105, 0]} rotation={[-Math.PI / 2, 0, 0.15]} receiveShadow>
+        <planeGeometry args={[2.5, 1.8]} />
+        <meshStandardMaterial color={0x8B4513} roughness={0.98} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Inner pattern stripe */}
+      <mesh position={[-2.5, 0.107, 0]} rotation={[-Math.PI / 2, 0, 0.15]}>
+        <planeGeometry args={[2, 1.3]} />
+        <meshStandardMaterial color={0xA0522D} roughness={0.95} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* ═══════ BOOKSHELF (right side wall) ═══════ */}
+      <group position={[4, 0.1, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        {/* Shelf frame */}
+        <mesh position={[0, 0.7, 0]} castShadow>
+          <boxGeometry args={[0.8, 1.4, 0.3]} />
+          <meshStandardMaterial color={0x5A3D2B} roughness={0.8} />
+        </mesh>
+        {/* Books — each a different color */}
+        {[0.25, 0.5, 0.75, 1.0].map((y, i) => (
+          <mesh key={i} position={[(-0.2 + i * 0.12), y, 0.02]} castShadow>
+            <boxGeometry args={[0.08, 0.18, 0.2]} />
+            <meshStandardMaterial
+              color={[0xA52A2A, 0x2E4057, 0x1B5E20, 0x6A1B9A][i]}
+              roughness={0.85}
+            />
+          </mesh>
+        ))}
+      </group>
+
+      {/* ═══════ RAILING LANTERNS ═══════ */}
+      <Lantern position={[-5.2, 1.15, -3.5]} showLight={showLights} />
+      <Lantern position={[5.2, 1.15, -3.5]} showLight={showLights} />
+      <Lantern position={[0, 1.15, -3.5]} showLight={showLights} />
+    </group>
+  );
+}
+
+// ─────────────────────────────────────────
+// STRING LIGHTS — catenary wire + emissive bulbs
+// Uses only 3 pointLights (left, center, right) instead of 12
+// ─────────────────────────────────────────
+function StringLights({ showLights }) {
+  const bulbCount = 12;
+  const lightsRef = useRef();
+
+  const bulbs = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < bulbCount; i++) {
+      const t = i / (bulbCount - 1);
+      const x = -4.5 + t * 9;
+      const sag = -Math.sin(t * Math.PI) * 0.5; // Catenary sag
+      arr.push({ x, y: 2.5 + sag, z: -1 });
+    }
+    return arr;
+  }, []);
+
+  return (
+    <group ref={lightsRef}>
+      {/* Wire segments connecting bulbs */}
+      {bulbs.map((b, i) => {
+        if (i === 0) return null;
+        const prev = bulbs[i - 1];
+        const midX = (b.x + prev.x) / 2;
+        const midY = (b.y + prev.y) / 2;
+        const dx = b.x - prev.x;
+        const dy = b.y - prev.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+        return (
+          <mesh key={`wire-${i}`} position={[midX, midY, -1]} rotation={[0, 0, angle]}>
+            <boxGeometry args={[len, 0.008, 0.008]} />
+            <meshStandardMaterial color={0x2A2A2A} roughness={0.6} />
+          </mesh>
+        );
+      })}
+
+      {/* Bulbs — all emissive, but NO individual pointLights */}
+      {bulbs.map((b, i) => (
+        <mesh key={`bulb-${i}`} position={[b.x, b.y - 0.1, b.z]}>
+          <sphereGeometry args={[0.04, 8, 6]} />
+          <meshStandardMaterial
+            color={0xFFE4B5}
+            emissive={showLights ? 0xFFD090 : 0x000000}
+            emissiveIntensity={showLights ? 1.5 : 0}
+            transparent opacity={0.9}
+          />
+        </mesh>
+      ))}
+
+      {/* Three shared pointLights covering all bulbs — much cheaper */}
+      {showLights && (
+        <>
+          <pointLight position={[-3, 2.1, -1]} color={0xFFE0B2} intensity={0.6} distance={5} decay={2} />
+          <pointLight position={[0, 2.0, -1]}  color={0xFFE0B2} intensity={0.6} distance={5} decay={2} />
+          <pointLight position={[3, 2.1, -1]}  color={0xFFE0B2} intensity={0.6} distance={5} decay={2} />
+        </>
+      )}
+    </group>
+  );
+}
+
+// ─────────────────────────────────────────
+// POTTED PLANT — pot + soil + layered leaf spheres
+// ─────────────────────────────────────────
+function PottedPlant({ position, scale = 1 }) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh position={[0, 0.15, 0]} castShadow>
+        <cylinderGeometry args={[0.18, 0.14, 0.3, 8]} />
+        <meshStandardMaterial color={0x8B4513} roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 0.3, 0]}>
+        <cylinderGeometry args={[0.16, 0.16, 0.02, 8]} />
+        <meshStandardMaterial color={0x3A2010} roughness={0.95} />
+      </mesh>
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <sphereGeometry args={[0.25, 8, 6]} />
+        <meshStandardMaterial color={0x3A6B2A} roughness={0.9} />
+      </mesh>
+      <mesh position={[0.08, 0.7, 0.05]} castShadow>
+        <sphereGeometry args={[0.18, 7, 5]} />
+        <meshStandardMaterial color={0x4A8B3A} roughness={0.9} />
+      </mesh>
+      <mesh position={[-0.05, 0.65, -0.06]}>
+        <sphereGeometry args={[0.15, 6, 5]} />
+        <meshStandardMaterial color={0x2D5A20} roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+// ─────────────────────────────────────────
+// HANGING VINE — cascading leaf blobs
+// ─────────────────────────────────────────
+function HangingVine({ position }) {
+  return (
+    <group position={position}>
+      {[0, 0.15, 0.3, 0.45].map((offset, i) => (
+        <mesh key={i} position={[offset * 0.5, -i * 0.15, 0.05]}>
+          <sphereGeometry args={[0.06, 6, 4]} />
+          <meshStandardMaterial color={0x2A5A1A} roughness={0.95} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+// ─────────────────────────────────────────
+// LANTERN — metal frame + warm glass + optional light
+// ─────────────────────────────────────────
+function Lantern({ position, showLight = false }) {
+  return (
+    <group position={position}>
+      <mesh castShadow>
+        <boxGeometry args={[0.1, 0.15, 0.1]} />
+        <meshStandardMaterial color={0x2A2A2A} roughness={0.4} metalness={0.7} />
+      </mesh>
+      <mesh>
+        <boxGeometry args={[0.07, 0.1, 0.07]} />
+        <meshStandardMaterial
+          color={0xFFE4B5}
+          emissive={showLight ? 0xFFD090 : 0x000000}
+          emissiveIntensity={showLight ? 2 : 0}
+          transparent opacity={0.6}
+        />
+      </mesh>
+      <mesh position={[0, 0.1, 0]}>
+        <coneGeometry args={[0.07, 0.06, 6]} />
+        <meshStandardMaterial color={0x2A2A2A} roughness={0.4} metalness={0.7} />
+      </mesh>
+      {showLight && (
+        <pointLight color={0xFFE0B2} intensity={0.6} distance={4} decay={2} />
+      )}
+    </group>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+export default function DisplayPedestal({ color = '#FF9F6B' }) {
+  const ringRef = useRef();
+  const glowRef = useRef();
+  const reducedMotion = useStore((s) => s.reducedMotion);
+
+  const colorInt = useMemo(() => new THREE.Color(color), [color]);
+
+  useFrame(({ clock }) => {
+    if (ringRef.current && !reducedMotion) {
+      ringRef.current.rotation.y = clock.getElapsedTime() * 0.3;
+    }
+    if (glowRef.current) {
+      const pulse = 0.3 + Math.sin(clock.getElapsedTime() * 2) * 0.15;
+      glowRef.current.material.opacity = pulse;
+    }
+  });
+
+  return (
+    <group>
+      {/* Pedestal base */}
+      <mesh position={[0, 0.15, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.4, 0.45, 0.3, 24]} />
+        <meshStandardMaterial color={0x1A1A1A} roughness={0.3} metalness={0.8} />
+      </mesh>
+
+      {/* Pedestal top surface */}
+      <mesh position={[0, 0.31, 0]}>
+        <cylinderGeometry args={[0.38, 0.38, 0.02, 24]} />
+        <meshStandardMaterial color={0x2A2A2A} roughness={0.2} metalness={0.9} />
+      </mesh>
+
+      {/* Glowing ring at base */}
+      <mesh ref={ringRef} position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.42, 0.48, 32]} />
+        <meshStandardMaterial
+          color={colorInt}
+          emissive={colorInt}
+          emissiveIntensity={0.8}
+          transparent
+          opacity={0.6}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      {/* Glow disc (subtle light pool) */}
+      <mesh ref={glowRef} position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.7, 32]} />
+        <meshBasicMaterial
+          color={colorInt}
+          transparent
+          opacity={0.2}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+import { useRef, useCallback } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { Float } from '@react-three/drei';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+export default function PortfolioObject({ item, children }) {
+  const groupRef = useRef();
+  const setActiveObject = useStore((s) => s.setActiveObject);
+  const setHoveredObject = useStore((s) => s.setHoveredObject);
+  const isDragging = useStore((s) => s.isDragging);
+  const reducedMotion = useStore((s) => s.reducedMotion);
+  const hoveredObject = useStore((s) => s.hoveredObject);
+  const hovered = hoveredObject === item.id;
+
+  const handleClick = useCallback((e) => {
+    e.stopPropagation();
+    // Don't trigger if user was dragging to look around
+    if (isDragging) return;
+    setActiveObject(item);
+  }, [item, setActiveObject, isDragging]);
+
+  const handlePointerOver = useCallback((e) => {
+    e.stopPropagation();
+    setHoveredObject(item.id);
+    document.body.style.cursor = 'pointer';
+  }, [item.id, setHoveredObject]);
+
+  const handlePointerOut = useCallback(() => {
+    setHoveredObject(null);
+    document.body.style.cursor = 'default';
+  }, [setHoveredObject]);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    const s = hovered ? 1.1 : 1;
+    groupRef.current.scale.lerp(new THREE.Vector3(s, s, s), 0.08);
+  });
+
+  const floatConfig = reducedMotion
+    ? { speed: 0, floatIntensity: 0, rotationIntensity: 0 }
+    : { speed: 2, floatIntensity: 0.4, rotationIntensity: 0.15 };
+
+  return (
+    <Float {...floatConfig}>
+      <group
+        ref={groupRef}
+        position={[0, 0.9, 0]}
+        onClick={handleClick}
+        onPointerOver={handlePointerOver}
+        onPointerOut={handlePointerOut}
+      >
+        {children}
+      </group>
+    </Float>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║  WalkController.jsx — First-person camera for the 3D balcony   ║
+ * ╚══════════════════════════════════════════════════════════════════╝
+ *
+ * HOW IT WORKS:
+ *   Desktop:  Click-drag on canvas to look around. WASD / Arrow keys to walk.
+ *   Mobile:   Single-finger drag to pan the camera. No keyboard needed.
+ *   Both:     Click (without dragging) triggers R3F's normal raycasting,
+ *             so PortfolioObject onClick handlers fire naturally.
+ *
+ * CONTROLS:
+ *   Mouse drag / Touch drag  →  Rotate camera (look around)
+ *   WASD / Arrow keys        →  Walk relative to camera heading
+ *   Shift                    →  Run (faster speed)
+ *   C                        →  Toggle crouch (lower eye-height, slower)
+ *
+ * HOW TO EDIT:
+ *   - Change WALK_SPEED, RUN_SPEED, CROUCH_SPEED below to adjust movement feel
+ *   - Change BOUNDS to expand/shrink the walkable area
+ *   - Add new furniture collision boxes to the COLLIDERS array
+ *   - Change LOOK_SPEED to make camera rotation faster/slower
+ *   - Change EYE_HEIGHT / CROUCH_HEIGHT to adjust camera vertical position
+ *
+ * MOBILE BEHAVIOR:
+ *   On touch devices, `isMobile` auto-detects and enables:
+ *   - Gentle auto-orbit so the scene doesn't feel static
+ *   - Single-finger drag rotates the camera
+ *   - Tap (without drag) triggers object clicks via R3F
+ *   - No on-screen joystick — clean, intuitive
+ */
+
+import { useRef, useEffect, useMemo } from 'react';
+import { useThree, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+// ─────────────────────────────────────────────
+// CONFIGURATION — edit these values to tune feel
+// ─────────────────────────────────────────────
+
+/** Walkable area boundaries (matches balcony railing/walls) */
+const BOUNDS = { minX: -5.2, maxX: 5.2, minZ: -3.0, maxZ: 4.2 };
+
+/** Movement speeds (units per second) */
+const WALK_SPEED = 3.2;
+const RUN_SPEED = 5.5;
+const CROUCH_SPEED = 1.6;
+
+/** Camera eye heights */
+const EYE_HEIGHT = 1.7;
+const CROUCH_HEIGHT = 1.05;
+
+/** Mouse/touch look sensitivity (radians per pixel of drag) */
+const LOOK_SPEED = 0.003;
+
+/** Head bob (walking animation) */
+const HEAD_BOB_SPEED = 9;
+const HEAD_BOB_AMOUNT = 0.02;
+
+/** Mobile auto-orbit speed (radians per second, very gentle) */
+const AUTO_ORBIT_SPEED = 0.04;
+
+// ─────────────────────────────────────────────
+// COLLISION BOXES — add new furniture here
+// ─────────────────────────────────────────────
+// Each box: { x, z, hw, hd }
+//   x, z    = center position on the floor
+//   hw      = half-width along X axis
+//   hd      = half-depth along Z axis
+//
+// HOW TO ADD: when you place a new mesh in the scene,
+// add an entry here with its position and approximate size.
+
+const COLLIDERS = [
+  { x: -2.5, z: -1.5, hw: 0.45, hd: 0.45 },   // Product design pedestal
+  { x: 1.8,  z: -2.0, hw: 0.45, hd: 0.45 },   // Kinetic sculpture pedestal
+  { x: 3.5,  z: 1.5,  hw: 0.45, hd: 0.45 },   // Research pedestal
+  { x: -4.0, z: 2.5,  hw: 0.8,  hd: 0.35 },   // Wooden bench
+  { x: -1.0, z: -0.5, hw: 0.35, hd: 0.35 },   // Side table
+  { x: 4.2,  z: 0.0,  hw: 0.3,  hd: 0.45 },   // Bookshelf
+  { x: 0.0,  z: 3.8,  hw: 0.3,  hd: 0.3 },    // Large plant pot
+];
+
+/**
+ * Check if position (px, pz) collides with any box.
+ * Uses closest-point-on-AABB distance check with player radius.
+ */
+function collides(px, pz, r = 0.3) {
+  for (const b of COLLIDERS) {
+    const cx = Math.max(b.x - b.hw, Math.min(px, b.x + b.hw));
+    const cz = Math.max(b.z - b.hd, Math.min(pz, b.z + b.hd));
+    const dx = px - cx;
+    const dz = pz - cz;
+    if (dx * dx + dz * dz < r * r) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────
+// COMPONENT
+// ─────────────────────────────────────────────
+
+export default function WalkController() {
+  const { camera, gl } = useThree();
+
+  // Camera rotation stored as Euler angles (YXZ = yaw first, then pitch)
+  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+
+  // Currently pressed keys (keyed by e.code)
+  const keys = useRef({});
+  const crouching = useRef(false);
+  const bobPhase = useRef(0);
+  const eyeH = useRef(EYE_HEIGHT);
+
+  // Drag-to-look state
+  const dragging = useRef(false);
+  const lastDragPos = useRef({ x: 0, y: 0 });
+  const dragMoved = useRef(false);
+
+  // Store bindings
+  const setIsDragging = useStore((s) => s.setIsDragging);
+  const reducedMotion = useStore((s) => s.reducedMotion);
+
+  // Detect touch device (for auto-orbit on mobile)
+  const isMobile = useMemo(() => {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  }, []);
+
+  // ── Initialize camera position ──
+  useEffect(() => {
+    camera.position.set(0, EYE_HEIGHT, 2);
+    euler.current.setFromQuaternion(camera.quaternion);
+  }, [camera]);
+
+  // ── Keyboard listeners (desktop only) ──
+  useEffect(() => {
+    const down = (e) => {
+      keys.current[e.code] = true;
+      if (e.code === 'KeyC') crouching.current = !crouching.current;
+    };
+    const up = (e) => {
+      keys.current[e.code] = false;
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, []);
+
+  // ── Mouse drag-to-look (desktop) ──
+  useEffect(() => {
+    const canvas = gl.domElement;
+
+    const onDown = (e) => {
+      if (e.button !== 0) return; // Left button only
+      dragging.current = true;
+      dragMoved.current = false;
+      lastDragPos.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const onMove = (e) => {
+      if (!dragging.current) return;
+
+      // Calculate how far mouse moved since last frame
+      const deltaX = e.clientX - lastDragPos.current.x;
+      const deltaY = e.clientY - lastDragPos.current.y;
+
+      // Only count as drag if moved more than 3px total (avoids accidental drags)
+      if (!dragMoved.current && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
+        dragMoved.current = true;
+        setIsDragging(true);
+      }
+
+      if (dragMoved.current) {
+        // Rotate camera based on mouse delta
+        euler.current.y -= deltaX * LOOK_SPEED;
+        euler.current.x -= deltaY * LOOK_SPEED;
+        // Clamp vertical look to prevent flipping
+        euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
+        camera.quaternion.setFromEuler(euler.current);
+      }
+
+      // Update for next frame's delta calculation
+      lastDragPos.current = { x: e.clientX, y: e.clientY };
+    };
+
+    const onUp = () => {
+      dragging.current = false;
+      // Small delay so R3F onClick handlers can check isDragging before it clears
+      setTimeout(() => setIsDragging(false), 60);
+    };
+
+    canvas.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+
+    return () => {
+      canvas.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [camera, gl.domElement, setIsDragging]);
+
+  // ── Touch drag-to-look (mobile) ──
+  useEffect(() => {
+    const canvas = gl.domElement;
+    let touchId = null;
+    let lastTouch = { x: 0, y: 0 };
+    let touchStartTime = 0;
+
+    const onStart = (e) => {
+      if (touchId !== null) return; // Only track one finger
+      const t = e.changedTouches[0];
+      touchId = t.identifier;
+      lastTouch = { x: t.clientX, y: t.clientY };
+      touchStartTime = Date.now();
+      dragMoved.current = false;
+    };
+
+    const onMoveT = (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier !== touchId) continue;
+        const dx = t.clientX - lastTouch.x;
+        const dy = t.clientY - lastTouch.y;
+
+        if (!dragMoved.current && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+          dragMoved.current = true;
+          setIsDragging(true);
+        }
+
+        if (dragMoved.current) {
+          euler.current.y -= dx * LOOK_SPEED;
+          euler.current.x -= dy * LOOK_SPEED;
+          euler.current.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, euler.current.x));
+          camera.quaternion.setFromEuler(euler.current);
+        }
+
+        lastTouch = { x: t.clientX, y: t.clientY };
+      }
+    };
+
+    const onEnd = (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === touchId) {
+          touchId = null;
+          setTimeout(() => setIsDragging(false), 60);
+        }
+      }
+    };
+
+    canvas.addEventListener('touchstart', onStart, { passive: true });
+    canvas.addEventListener('touchmove', onMoveT, { passive: true });
+    canvas.addEventListener('touchend', onEnd);
+
+    return () => {
+      canvas.removeEventListener('touchstart', onStart);
+      canvas.removeEventListener('touchmove', onMoveT);
+      canvas.removeEventListener('touchend', onEnd);
+    };
+  }, [camera, gl.domElement, setIsDragging]);
+
+  // ── Per-frame update: movement + head bob + auto-orbit ──
+  useFrame((_, delta) => {
+    const k = keys.current;
+    const wk = k.KeyW || k.ArrowUp;
+    const sk = k.KeyS || k.ArrowDown;
+    const ak = k.KeyA || k.ArrowLeft;
+    const dk = k.KeyD || k.ArrowRight;
+    const run = (k.ShiftLeft || k.ShiftRight) && !crouching.current;
+    const moving = wk || sk || ak || dk;
+
+    // ── Smooth height transition (standing ↔ crouching) ──
+    const targetH = crouching.current ? CROUCH_HEIGHT : EYE_HEIGHT;
+    eyeH.current += (targetH - eyeH.current) * 0.1;
+
+    if (moving) {
+      // ── WASD movement (desktop) ──
+      const speed = crouching.current ? CROUCH_SPEED : run ? RUN_SPEED : WALK_SPEED;
+
+      // Get camera forward vector projected onto XZ plane
+      const fwd = new THREE.Vector3();
+      camera.getWorldDirection(fwd);
+      fwd.y = 0;
+      fwd.normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+
+      // Combine input
+      const move = new THREE.Vector3();
+      if (wk) move.add(fwd);
+      if (sk) move.sub(fwd);
+      if (dk) move.add(right);
+      if (ak) move.sub(right);
+      move.normalize().multiplyScalar(speed * delta);
+
+      // Apply bounds clamping
+      const nx = THREE.MathUtils.clamp(camera.position.x + move.x, BOUNDS.minX, BOUNDS.maxX);
+      const nz = THREE.MathUtils.clamp(camera.position.z + move.z, BOUNDS.minZ, BOUNDS.maxZ);
+
+      // Wall-slide collision: try both axes, then each individually
+      if (!collides(nx, nz)) {
+        camera.position.x = nx;
+        camera.position.z = nz;
+      } else if (!collides(nx, camera.position.z)) {
+        camera.position.x = nx; // Slide along X
+      } else if (!collides(camera.position.x, nz)) {
+        camera.position.z = nz; // Slide along Z
+      }
+
+      // ── Head bob animation ──
+      if (!reducedMotion) {
+        const amt = run ? HEAD_BOB_AMOUNT * 2 : HEAD_BOB_AMOUNT;
+        bobPhase.current += delta * (run ? HEAD_BOB_SPEED * 1.3 : HEAD_BOB_SPEED);
+        camera.position.y = eyeH.current + Math.sin(bobPhase.current) * amt;
+      } else {
+        camera.position.y = eyeH.current;
+      }
+    } else {
+      // ── Idle — settle to standing height ──
+      camera.position.y += (eyeH.current - camera.position.y) * 0.12;
+      bobPhase.current = 0;
+
+      // ── Mobile auto-orbit (gentle rotation when idle) ──
+      if (isMobile && !dragging.current && !reducedMotion) {
+        euler.current.y += AUTO_ORBIT_SPEED * delta;
+        camera.quaternion.setFromEuler(euler.current);
+      }
+    }
+  });
+
+  // This component is pure logic — no JSX elements rendered
+  return null;
+}
+
+
+
+
+
+
+import { useMemo } from 'react';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+/**
+ * Campus — buildings, paths, trees, life around the balcony.
+ * Trees use offset canopy spheres with depthWrite to prevent z-fighting.
+ */
+export default function Campus() {
+  const qualityLevel = useStore((s) => s.qualityLevel);
+
+  return (
+    <group>
+      {/* Ground */}
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -5.01, -30]}>
+        <planeGeometry args={[300, 300]} />
+        <meshStandardMaterial color={0x4A6237} roughness={0.95} />
+      </mesh>
+
+      {/* Courtyard */}
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -4.99, -8]}>
+        <planeGeometry args={[20, 12]} />
+        <meshStandardMaterial color={0x9B8B7B} roughness={0.9} />
+      </mesh>
+
+      {/* Path */}
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -4.98, -20]}>
+        <planeGeometry args={[3.5, 20]} />
+        <meshStandardMaterial color={0x8A7A6A} roughness={0.85} />
+      </mesh>
+
+      {/* ── Buildings ── */}
+      <Building position={[-22, -2, 0]} size={[12, 8, 14]} roofColor={0x8B4513} wallColor={0xC8B8A0} />
+      <Building position={[22, -1.5, -5]} size={[10, 7, 12]} roofColor={0x7A5030} wallColor={0xBDAA92} />
+      <Building position={[0, -1, -35]} size={[25, 10, 8]} roofColor={0x8B5A2B} wallColor={0xD4C4A8} />
+
+      {/* ── Trees — spaced out, no overlap ── */}
+      {[
+        [-12, -5, -8], [-8, -5, -20], [10, -5, -14], [14, -5, -6],
+        [-15, -5, -28], [8, -5, -30], [-6, -5, -35], [18, -5, -22],
+        [-18, -5, 8], [16, -5, 10], [-10, -5, -42], [12, -5, -40],
+      ].map((pos, i) => (
+        <Tree key={i} position={pos} seed={i} />
+      ))}
+
+      {/* ── Bushes ── */}
+      {[
+        [-7, -4.6, -6], [7, -4.6, -6], [-10, -4.6, -12], [12, -4.6, -16],
+      ].map((pos, i) => (
+        <mesh key={`b-${i}`} position={pos} castShadow>
+          <sphereGeometry args={[0.7 + (i * 0.15), 8, 6]} />
+          <meshLambertMaterial color={0x3A6B30} />
+        </mesh>
+      ))}
+
+      {/* ── Lamp posts ── */}
+      {[[-2.5, -5, -12], [2.5, -5, -12], [-2.5, -5, -22], [2.5, -5, -22]].map((pos, i) => (
+        <LampPost key={i} position={pos} />
+      ))}
+
+      {/* Courtyard bench */}
+      <group position={[6, -4.8, -10]} rotation={[0, -Math.PI / 2, 0]}>
+        <mesh position={[0, 0.3, 0]}>
+          <boxGeometry args={[1.5, 0.08, 0.5]} />
+          <meshStandardMaterial color={0x5A3D2B} roughness={0.8} />
+        </mesh>
+        <mesh position={[0, 0.5, -0.22]}>
+          <boxGeometry args={[1.5, 0.45, 0.06]} />
+          <meshStandardMaterial color={0x5A3D2B} roughness={0.8} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+function Building({ position, size, roofColor, wallColor }) {
+  return (
+    <group position={position}>
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={size} />
+        <meshLambertMaterial color={wallColor} />
+      </mesh>
+      <mesh position={[0, size[1] / 2 + 1.2, 0]} castShadow>
+        <boxGeometry args={[size[0] + 1, 2.5, size[2] + 1]} />
+        <meshLambertMaterial color={roofColor} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Tree with z-fighting prevention:
+ * - Each canopy sphere is non-overlapping (offset clearly)
+ * - Uses Lambert material (no specular to cause flicker)
+ * - Single merged canopy approach
+ */
+function Tree({ position, seed = 0 }) {
+  const scale = 0.85 + (seed % 5) * 0.12;
+  const hueShift = (seed % 3) * 15;
+
+  // Slightly different greens per tree
+  const colors = useMemo(() => [
+    new THREE.Color().setHSL((120 + hueShift) / 360, 0.45, 0.28),
+    new THREE.Color().setHSL((125 + hueShift) / 360, 0.5, 0.32),
+    new THREE.Color().setHSL((115 + hueShift) / 360, 0.4, 0.25),
+  ], [hueShift]);
+
+  return (
+    <group position={position} scale={scale}>
+      {/* Trunk */}
+      <mesh position={[0, 1.5, 0]} castShadow>
+        <cylinderGeometry args={[0.12, 0.22, 3, 6]} />
+        <meshLambertMaterial color={0x5A3D2B} />
+      </mesh>
+      {/* Main canopy — single large sphere (no overlap z-fight) */}
+      <mesh position={[0, 3.8, 0]} castShadow>
+        <sphereGeometry args={[2.0, 8, 6]} />
+        <meshLambertMaterial color={colors[0]} />
+      </mesh>
+      {/* Top tuft — clearly above, no overlap */}
+      <mesh position={[0, 5.5, 0]} castShadow>
+        <sphereGeometry args={[1.2, 7, 5]} />
+        <meshLambertMaterial color={colors[1]} />
+      </mesh>
+      {/* Side tuft — clearly to the side */}
+      <mesh position={[1.2, 4.2, 0.8]} castShadow>
+        <sphereGeometry args={[0.9, 6, 5]} />
+        <meshLambertMaterial color={colors[2]} />
+      </mesh>
+    </group>
+  );
+}
+
+function LampPost({ position }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 1.5, 0]}>
+        <cylinderGeometry args={[0.04, 0.06, 3, 6]} />
+        <meshStandardMaterial color={0x2A2A2A} roughness={0.4} metalness={0.8} />
+      </mesh>
+      <mesh position={[0, 3.1, 0]}>
+        <sphereGeometry args={[0.15, 8, 6]} />
+        <meshStandardMaterial color={0xFFE4C4} emissive={0xFFD4A0} emissiveIntensity={0.6} />
+      </mesh>
+      <pointLight position={[0, 3, 0]} color={0xFFE0B2} intensity={2} distance={8} decay={2} />
+    </group>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useMemo } from 'react';
+import useStore from '../../store/useStore';
+import { theme, lerpColor } from '../../config/theme';
+
+export default function DynamicLighting() {
+  const sunPosition = useStore((s) => s.sunPosition);
+  const timeOfDay = useStore((s) => s.timeOfDay);
+  const isNight = useStore((s) => s.isNight);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+
+  const lightConfig = useMemo(() => {
+    if (isNight) {
+      return {
+        directionalColor: theme.moonlightInt,
+        directionalIntensity: 0.4,
+        ambientColor: 0x1A1A3E,
+        ambientIntensity: 0.2,
+      };
+    }
+
+    const isGoldenHour = timeOfDay < 0.3 || timeOfDay > 0.7;
+    if (isGoldenHour) {
+      return {
+        directionalColor: theme.sunGoldenInt,
+        directionalIntensity: 1.5,
+        ambientColor: lerpColor(0x1A1A3E, 0xFFE4C4, 0.4),
+        ambientIntensity: 0.35,
+      };
+    }
+
+    return {
+      directionalColor: 0xFFF5E6,
+      directionalIntensity: 2.0,
+      ambientColor: 0xC4D4E8,
+      ambientIntensity: 0.5,
+    };
+  }, [isNight, timeOfDay]);
+
+  const shadowMapSize = qualityLevel === 'high' ? 2048 : qualityLevel === 'medium' ? 1024 : 512;
+
+  return (
+    <>
+      <directionalLight
+        position={sunPosition}
+        color={lightConfig.directionalColor}
+        intensity={lightConfig.directionalIntensity}
+        castShadow={qualityLevel !== 'low'}
+        shadow-mapSize-width={shadowMapSize}
+        shadow-mapSize-height={shadowMapSize}
+        shadow-camera-near={0.5}
+        shadow-camera-far={80}
+        shadow-camera-left={-30}
+        shadow-camera-right={30}
+        shadow-camera-top={30}
+        shadow-camera-bottom={-30}
+        shadow-bias={-0.0001}
+      />
+
+      <ambientLight
+        color={lightConfig.ambientColor}
+        intensity={lightConfig.ambientIntensity}
+      />
+
+      <hemisphereLight
+        skyColor={isNight ? 0x0A1628 : 0x87CEEB}
+        groundColor={theme.groundInt}
+        intensity={isNight ? 0.08 : 0.3}
+      />
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { Sky, Stars } from '@react-three/drei';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+/**
+ * Animated clouds built from instanced billboard sprites with soft circular textures.
+ * No rectangles — we use a canvas-generated radial gradient as the cloud texture.
+ */
+function AnimatedClouds() {
+  const groupRef = useRef();
+  const weather = useStore((s) => s.weather);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+
+  // Generate soft circular cloud texture
+  const cloudTexture = useMemo(() => {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.8)');
+    gradient.addColorStop(0.4, 'rgba(255,255,255,0.4)');
+    gradient.addColorStop(0.7, 'rgba(255,255,255,0.1)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }, []);
+
+  // Cloud puffs — each cloud is a cluster of overlapping puffs
+  const clouds = useMemo(() => {
+    let count = 15;
+    if (weather.condition === 'clouds') count = 30;
+    if (weather.condition === 'rain' || weather.condition === 'thunderstorm') count = 40;
+    if (weather.condition === 'fog') count = 20;
+    if (qualityLevel === 'low') count = Math.floor(count * 0.5);
+
+    return Array.from({ length: count }, (_, i) => {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 40 + Math.random() * 120;
+      return {
+        x: Math.sin(angle) * dist,
+        y: 20 + Math.random() * 25,
+        z: -30 + Math.cos(angle) * dist * 0.5,
+        scale: 8 + Math.random() * 20,
+        speed: 0.5 + Math.random() * 1.5,
+        opacity: weather.condition === 'clear' ? 0.15 + Math.random() * 0.15 : 0.25 + Math.random() * 0.35,
+      };
+    });
+  }, [weather.condition, qualityLevel]);
+
+  // Animate drift
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    groupRef.current.children.forEach((child, i) => {
+      if (clouds[i]) {
+        child.position.x += clouds[i].speed * delta;
+        if (child.position.x > 160) child.position.x = -160;
+      }
+    });
+  });
+
+  return (
+    <group ref={groupRef}>
+      {clouds.map((c, i) => (
+        <sprite key={i} position={[c.x, c.y, c.z]} scale={[c.scale, c.scale * 0.5, 1]}>
+          <spriteMaterial
+            map={cloudTexture}
+            transparent
+            opacity={c.opacity}
+            depthWrite={false}
+            fog={false}
+          />
+        </sprite>
+      ))}
+    </group>
+  );
+}
+
+export default function DynamicSky() {
+  const sunPosition = useStore((s) => s.sunPosition);
+  const isNight = useStore((s) => s.isNight);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const weather = useStore((s) => s.weather);
+
+  const turbidity = useMemo(() => {
+    let base = 6;
+    if (weather.condition === 'clouds') base += 4;
+    if (weather.condition === 'rain' || weather.condition === 'thunderstorm') base += 6;
+    if (weather.condition === 'fog') base += 8;
+    return base;
+  }, [weather.condition]);
+
+  const starsCount = qualityLevel === 'low' ? 1000 : qualityLevel === 'medium' ? 3000 : 5000;
+
+  return (
+    <>
+      {!isNight && (
+        <Sky
+          sunPosition={sunPosition}
+          turbidity={turbidity}
+          rayleigh={3}
+          mieCoefficient={0.025}
+          mieDirectionalG={0.9}
+        />
+      )}
+
+      {/* Animated sprite-based clouds — no rectangles, soft radial gradient */}
+      <AnimatedClouds />
+
+      <Stars
+        radius={200}
+        depth={80}
+        count={starsCount}
+        factor={isNight ? 6 : 1}
+        saturation={0}
+        fade
+        speed={0.5}
+      />
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { EffectComposer, Bloom, Vignette, ToneMapping } from '@react-three/postprocessing';
+import { ToneMappingMode } from 'postprocessing';
+import useStore from '../../store/useStore';
+
+export default function PostEffects() {
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const isNight = useStore((s) => s.isNight);
+
+  // Disable all post-processing on low quality
+  if (qualityLevel === 'low') return null;
+
+  return (
+    <EffectComposer multisampling={qualityLevel === 'high' ? 4 : 0}>
+      <Bloom
+        luminanceThreshold={isNight ? 0.2 : 0.6}
+        luminanceSmoothing={0.4}
+        intensity={isNight ? 1.2 : 0.4}
+        mipmapBlur
+      />
+      <Vignette
+        offset={0.3}
+        darkness={isNight ? 0.7 : 0.35}
+        eskil={false}
+      />
+      <ToneMapping mode={ToneMappingMode.AGX} />
+    </EffectComposer>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔═══════════════════════════════════════════════════════════════╗
+ * ║  WeatherEffects.jsx — Rain, snow, and other weather particles ║
+ * ╚═══════════════════════════════════════════════════════════════╝
+ *
+ * HOW IT WORKS:
+ *   Uses a FIXED-SIZE particle buffer (MAX_PARTICLES) that never resizes.
+ *   When weather changes, we show/hide particles by count, not by recreating arrays.
+ *   This prevents the THREE.WebGLAttributes buffer resize crash.
+ *
+ * HOW TO EDIT:
+ *   - Change MAX_PARTICLES for more/fewer particles (higher = heavier GPU usage)
+ *   - Change SPREAD_X / SPREAD_Z for particle area coverage
+ *   - Change fall speeds in the useFrame loop
+ */
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+import { getWeatherSceneParams } from '../../utils/weather';
+
+// Fixed max particle count — buffer is allocated once and never resized
+const MAX_PARTICLES = 3000;
+const SPREAD_X = 30;
+const SPREAD_Z = 30;
+const MAX_HEIGHT = 15;
+
+export default function WeatherEffects() {
+  const weather = useStore((s) => s.weather);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const pointsRef = useRef();
+
+  const sceneParams = useMemo(() => getWeatherSceneParams(weather), [weather]);
+
+  // How many of the MAX_PARTICLES to actually animate this frame
+  const activeCount = useMemo(() => {
+    if (!sceneParams.particleType) return 0;
+    const scale = qualityLevel === 'low' ? 0.25 : qualityLevel === 'medium' ? 0.5 : 1;
+    return Math.min(Math.floor(sceneParams.particleCount * scale), MAX_PARTICLES);
+  }, [sceneParams, qualityLevel]);
+
+  // Pre-allocate a FIXED buffer — never changes size
+  const positions = useMemo(() => {
+    const arr = new Float32Array(MAX_PARTICLES * 3);
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      arr[i * 3]     = (Math.random() - 0.5) * SPREAD_X;
+      arr[i * 3 + 1] = Math.random() * MAX_HEIGHT;
+      arr[i * 3 + 2] = (Math.random() - 0.5) * SPREAD_Z;
+    }
+    return arr;
+  }, []); // Never recreated — this is the key fix
+
+  // Animate active particles, leave excess offscreen
+  useFrame((_, delta) => {
+    if (!pointsRef.current || activeCount === 0) return;
+
+    const pos = pointsRef.current.geometry.attributes.position.array;
+    const isSnow = sceneParams.particleType === 'snow';
+    const fallSpeed = isSnow ? 1.5 : 12;
+    const drift = sceneParams.windStrength * 2;
+
+    for (let i = 0; i < activeCount; i++) {
+      pos[i * 3 + 1] -= fallSpeed * delta;   // Fall down
+      pos[i * 3]     += drift * delta;        // Wind drift
+
+      // Reset when below ground
+      if (pos[i * 3 + 1] < -1) {
+        pos[i * 3 + 1] = MAX_HEIGHT;
+        pos[i * 3]     = (Math.random() - 0.5) * SPREAD_X;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * SPREAD_Z;
+      }
+    }
+
+    // Push inactive particles far below (invisible)
+    for (let i = activeCount; i < MAX_PARTICLES; i++) {
+      pos[i * 3 + 1] = -100;
+    }
+
+    pointsRef.current.geometry.attributes.position.needsUpdate = true;
+  });
+
+  // Hide entirely when no weather particles needed
+  if (!sceneParams.particleType) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={MAX_PARTICLES}
+          array={positions}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <pointsMaterial
+        color={sceneParams.particleType === 'snow' ? 0xFFFFFF : 0xAABBCC}
+        size={sceneParams.particleType === 'snow' ? 0.06 : 0.02}
+        transparent
+        opacity={0.6}
+        sizeAttenuation
+        depthWrite={false}
+      />
+    </points>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+const LIGHT_COUNT = 80;
+
+export default function DistantCityLights() {
+  const isNight = useStore((s) => s.isNight);
+  const timeOfDay = useStore((s) => s.timeOfDay);
+  const pointsRef = useRef();
+
+  // Only show from dusk onwards
+  const visible = timeOfDay > 0.65 || timeOfDay < 0.3;
+
+  const { positions, colors } = useMemo(() => {
+    const pos = new Float32Array(LIGHT_COUNT * 3);
+    const col = new Float32Array(LIGHT_COUNT * 3);
+
+    for (let i = 0; i < LIGHT_COUNT; i++) {
+      // Place along the far horizon
+      const angle = (Math.random() - 0.5) * Math.PI * 0.6;
+      const dist = 80 + Math.random() * 120;
+      pos[i * 3] = Math.sin(angle) * dist;
+      pos[i * 3 + 1] = -3 + Math.random() * 3;
+      pos[i * 3 + 2] = -Math.cos(angle) * dist;
+
+      // Warm white / orange / yellow tones
+      const warmth = Math.random();
+      col[i * 3] = 1.0;
+      col[i * 3 + 1] = 0.7 + warmth * 0.3;
+      col[i * 3 + 2] = 0.3 + warmth * 0.4;
+    }
+    return { positions: pos, colors: col };
+  }, []);
+
+  // Twinkle
+  useFrame(({ clock }) => {
+    if (!pointsRef.current || !visible) return;
+    const t = clock.getElapsedTime();
+    const opacity = 0.4 + Math.sin(t * 0.5) * 0.15;
+    pointsRef.current.material.opacity = opacity;
+  });
+
+  if (!visible) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={LIGHT_COUNT} array={positions} itemSize={3} />
+        <bufferAttribute attach="attributes-color" count={LIGHT_COUNT} array={colors} itemSize={3} />
+      </bufferGeometry>
+      <pointsMaterial
+        vertexColors
+        size={0.5}
+        transparent
+        opacity={0.5}
+        sizeAttenuation
+        depthWrite={false}
+      />
+    </points>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+const COUNT = 60;
+
+export default function Fireflies() {
+  const pointsRef = useRef();
+  const isNight = useStore((s) => s.isNight);
+  const timeOfDay = useStore((s) => s.timeOfDay);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const reducedMotion = useStore((s) => s.reducedMotion);
+
+  // Only visible dusk through dawn
+  const visible = timeOfDay > 0.7 || timeOfDay < 0.3;
+
+  const count = qualityLevel === 'low' ? 20 : qualityLevel === 'medium' ? 40 : COUNT;
+
+  const { positions, randoms } = useMemo(() => {
+    const pos = new Float32Array(count * 3);
+    const rand = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 14;
+      pos[i * 3 + 1] = 0.3 + Math.random() * 2.5;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 12;
+      rand[i] = Math.random() * Math.PI * 2;
+    }
+    return { positions: pos, randoms: rand };
+  }, [count]);
+
+  useFrame(({ clock }) => {
+    if (!pointsRef.current || !visible || reducedMotion) return;
+    const t = clock.getElapsedTime();
+    const pos = pointsRef.current.geometry.attributes.position.array;
+
+    for (let i = 0; i < count; i++) {
+      const offset = randoms[i];
+      pos[i * 3] += Math.sin(t * 0.5 + offset) * 0.003;
+      pos[i * 3 + 1] += Math.cos(t * 0.7 + offset) * 0.002;
+      pos[i * 3 + 2] += Math.sin(t * 0.3 + offset * 2) * 0.003;
+    }
+    pointsRef.current.geometry.attributes.position.needsUpdate = true;
+
+    // Flicker opacity
+    const flicker = 0.4 + Math.sin(t * 4) * 0.3;
+    pointsRef.current.material.opacity = flicker;
+  });
+
+  if (!visible) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={count}
+          array={positions}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <pointsMaterial
+        color={0xFFE4A0}
+        size={0.06}
+        transparent
+        opacity={0.6}
+        sizeAttenuation
+        depthWrite={false}
+      />
+    </points>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+// Improved ShootingStars.jsx
+import { useRef, useEffect } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+export default function ShootingStars() {
+  const isNight = useStore((s) => s.isNight);
+  const starsData = useRef([]); // Hold data in a ref, NOT state
+  const groupRef = useRef();
+
+  // Spawner
+  useEffect(() => {
+    if (!isNight) return;
+    const interval = setInterval(() => {
+      if (Math.random() > 0.6) {
+        // Create a new mesh imperatively
+        const mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.15, 6, 4),
+          new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true })
+        );
+
+        const star = {
+          mesh,
+          start: [(Math.random() - 0.5) * 200, 50 + Math.random() * 30, -100 - Math.random() * 100],
+          velocity: [(Math.random() - 0.5) * 80, -30 - Math.random() * 20, (Math.random() - 0.5) * 30],
+          life: 0,
+          maxLife: 1.5 + Math.random(),
+        };
+
+        groupRef.current.add(mesh);
+        starsData.current.push(star);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [isNight]);
+
+  // Animator
+  useFrame((_, delta) => {
+    for (let i = starsData.current.length - 1; i >= 0; i--) {
+      const star = starsData.current[i];
+      star.life += delta;
+
+      if (star.life >= star.maxLife) {
+        // Cleanup dead stars
+        groupRef.current.remove(star.mesh);
+        star.mesh.geometry.dispose();
+        star.mesh.material.dispose();
+        starsData.current.splice(i, 1);
+      } else {
+        // Move live stars directly
+        const progress = star.life / star.maxLife;
+        star.mesh.position.set(
+          star.start[0] + star.velocity[0] * star.life,
+          star.start[1] + star.velocity[1] * star.life,
+          star.start[2] + star.velocity[2] * star.life
+        );
+        star.mesh.material.opacity = (1 - progress) * 0.8;
+      }
+    }
+  });
+
+  if (!isNight) return null;
+  return <group ref={groupRef} />;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useEffect } from 'react';
+import { useThree } from '@react-three/fiber';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+import { theme, lerpColor } from '../../config/theme';
+
+export default function AtmosphericFog() {
+  const { scene } = useThree();
+  const isNight = useStore((s) => s.isNight);
+  const weather = useStore((s) => s.weather);
+  const timeOfDay = useStore((s) => s.timeOfDay);
+
+  useEffect(() => {
+    const fogColor = isNight ? theme.fogNightInt : theme.fogDayInt;
+    let density = 0.008;
+
+    if (weather.condition === 'fog') density = 0.025;
+    else if (weather.condition === 'rain') density = 0.015;
+    else if (weather.condition === 'clouds') density = 0.012;
+
+    scene.fog = new THREE.FogExp2(fogColor, density);
+    scene.background = new THREE.Color(fogColor);
+
+    return () => {
+      scene.fog = null;
+    };
+  }, [scene, isNight, weather.condition, timeOfDay]);
+
+  return null;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useMemo } from 'react';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+import { theme } from '../../config/theme';
+
+// Simple 2D simplex-like noise for terrain displacement
+function noise2D(x, z) {
+  const n = Math.sin(x * 1.2 + z * 0.8) * 0.5
+    + Math.sin(x * 0.3 - z * 1.7) * 0.25
+    + Math.sin(x * 2.1 + z * 2.4) * 0.125;
+  return n;
+}
+
+export default function HorizonTerrain() {
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const isNight = useStore((s) => s.isNight);
+
+  const segments = qualityLevel === 'low' ? 40 : qualityLevel === 'medium' ? 80 : 120;
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.PlaneGeometry(500, 500, segments, segments);
+    const positions = geo.attributes.position.array;
+    const colors = new Float32Array(positions.length);
+
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const z = positions[i + 1]; // before rotation, Y is the "forward" axis
+
+      // Height displacement
+      const height = noise2D(x * 0.02, z * 0.02) * 8
+        + noise2D(x * 0.005, z * 0.005) * 15;
+      positions[i + 2] = height; // Z becomes up after rotation
+
+      // Color gradient by distance (darker near, lighter far)
+      const dist = Math.sqrt(x * x + z * z) / 250;
+      const r = 0.12 + dist * 0.15;
+      const g = 0.18 + dist * 0.2;
+      const b = 0.1 + dist * 0.15;
+      colors[i] = r;
+      colors[i + 1] = g;
+      colors[i + 2] = b;
+    }
+
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }, [segments]);
+
+  return (
+    <mesh
+      geometry={geometry}
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, -5, -100]}
+      receiveShadow
+      raycast={() => null}
+    >
+      <meshStandardMaterial
+        vertexColors
+        roughness={0.95}
+        metalness={0.0}
+        side={THREE.FrontSide}
+      />
+    </mesh>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔══════════════════════════════════════════════════════════════╗
+ * ║  LoadingScreen.jsx — Cinematic loading screen                ║
+ * ╚══════════════════════════════════════════════════════════════╝
+ *
+ * Shows while 3D assets load. Auto-hides when isLoaded becomes true.
+ * Progress bar tracks the faked loading animation.
+ */
+
+import { useEffect, useRef } from 'react';
+import useStore from '../../store/useStore';
+import { SITE } from '../../data/portfolio';
+
+export default function LoadingScreen() {
+  const isLoaded = useStore((s) => s.isLoaded);
+  const setLoadingProgress = useStore((s) => s.setLoadingProgress);
+  const progress = useStore((s) => s.loadingProgress);
+  const intervalRef = useRef(null);
+
+  // Simulate loading progress (the 3D scene doesn't expose granular progress)
+  useEffect(() => {
+    let p = 0;
+    intervalRef.current = setInterval(() => {
+      // Fast initially, slows down near 100
+      p += (100 - p) * 0.08;
+      if (p > 95) p = 95; // Hold at 95% until scene is truly ready
+      setLoadingProgress(Math.round(p));
+    }, 100);
+
+    return () => clearInterval(intervalRef.current);
+  }, [setLoadingProgress]);
+
+  // Jump to 100% when scene is loaded
+  useEffect(() => {
+    if (isLoaded) {
+      clearInterval(intervalRef.current);
+      setLoadingProgress(100);
+    }
+  }, [isLoaded, setLoadingProgress]);
+
+  return (
+    <div className={`loading-screen ${isLoaded ? 'loaded' : ''}`} id="loading-screen">
+      <div className="ls-content">
+        <div className="ls-logo">⬡</div>
+        <div className="ls-title">{SITE.shortTitle}</div>
+        <div className="ls-bar">
+          <div className="ls-bar-fill" style={{ width: `${progress}%` }} />
+        </div>
+        <div className="ls-hint">Preparing your space…</div>
+      </div>
+    </div>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔═══════════════════════════════════════════════════════════╗
+ * ║  Overlay.jsx — HUD elements always visible on screen      ║
+ * ╚═══════════════════════════════════════════════════════════╝
+ *
+ * Contains:
+ *   - Weather + time badge (top-right)
+ *   - Controls hint (bottom-left, auto-fades)
+ *   - Action buttons: Portfolio, Mute, Settings (bottom-right)
+ *   - Settings panel (centered modal)
+ */
+
+import { useState, useEffect } from 'react';
+import useStore from '../../store/useStore';
+
+const WEATHER_OPTIONS = [
+  { value: null,           label: 'Auto',  emoji: '🔄' },
+  { value: 'clear',        label: 'Clear', emoji: '☀️' },
+  { value: 'clouds',       label: 'Cloudy', emoji: '☁️' },
+  { value: 'rain',         label: 'Rain',  emoji: '🌧️' },
+  { value: 'snow',         label: 'Snow',  emoji: '❄️' },
+  { value: 'fog',          label: 'Fog',   emoji: '🌫️' },
+  { value: 'thunderstorm', label: 'Storm', emoji: '⛈️' },
+];
+
+export default function Overlay({ onOpenPortfolio }) {
+  const isMuted = useStore((s) => s.isMuted);
+  const toggleMute = useStore((s) => s.toggleMute);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const setQualityLevel = useStore((s) => s.setQualityLevel);
+  const setAutoQuality = useStore((s) => s.setAutoQuality);
+  const reducedMotion = useStore((s) => s.reducedMotion);
+  const setReducedMotion = useStore((s) => s.setReducedMotion);
+  const weather = useStore((s) => s.weather);
+  const timeOverride = useStore((s) => s.timeOverride);
+  const setTimeOverride = useStore((s) => s.setTimeOverride);
+  const weatherOverride = useStore((s) => s.weatherOverride);
+  const setWeatherOverride = useStore((s) => s.setWeatherOverride);
+
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Respect system reduce-motion preference
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (mq.matches) setReducedMotion(true);
+    const h = (e) => setReducedMotion(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, [setReducedMotion]);
+
+  // Weather emoji map
+  const weatherEmoji = {
+    clear: '☀️', clouds: '☁️', fog: '🌫️', rain: '🌧️',
+    drizzle: '🌦️', snow: '❄️', thunderstorm: '⛈️',
+  };
+
+  const formatTime = () => {
+    if (timeOverride !== null) {
+      const h = Math.floor(timeOverride);
+      const m = Math.floor((timeOverride % 1) * 60);
+      return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+    }
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <>
+      {/* ═══ HUD: Weather + Time (top-right) ═══ */}
+      <div className="hud-top">
+        <div className="hud-weather">
+          <span className="hud-emoji">{weatherEmoji[weather.condition] || '🌤️'}</span>
+          <span className="hud-temp">{Math.round(weather.temperature)}°</span>
+        </div>
+        <div className="hud-time">{formatTime()}</div>
+      </div>
+
+      {/* ═══ HUD: Controls hint (bottom-left, auto-fades) ═══ */}
+      <div className="hud-controls-hint">
+        <span>Drag to look · WASD to walk · Click objects</span>
+      </div>
+
+      {/* ═══ HUD: Action buttons (bottom-right) ═══ */}
+      <div className="hud-actions">
+        <button
+          className="hud-btn portfolio-btn"
+          onClick={onOpenPortfolio}
+          aria-label="Open portfolio"
+          title="Portfolio"
+        >
+          ☰
+        </button>
+        <button
+          className={`hud-btn ${!isMuted ? 'active' : ''}`}
+          onClick={toggleMute}
+          aria-label={isMuted ? 'Unmute' : 'Mute'}
+          title={isMuted ? 'Unmute' : 'Mute'}
+        >
+          {isMuted ? '🔇' : '🔊'}
+        </button>
+        <button
+          className={`hud-btn ${showSettings ? 'active' : ''}`}
+          onClick={() => setShowSettings(!showSettings)}
+          aria-label="Settings"
+          title="Settings"
+        >
+          ⚙️
+        </button>
+      </div>
+
+      {/* ═══ Settings Panel (centered modal) ═══ */}
+      {showSettings && (
+        <>
+          <div className="settings-panel-backdrop" onClick={() => setShowSettings(false)} />
+          <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="sp-header">
+              <span className="sp-title">Settings</span>
+              <button className="sp-close" onClick={() => setShowSettings(false)}>✕</button>
+            </div>
+
+            {/* Time of day */}
+            <div className="sp-section">
+              <div className="sp-label">
+                Time of Day
+                <span className="sp-value">{timeOverride !== null ? formatTime() : 'Real time'}</span>
+              </div>
+              <div className="sp-row">
+                <span className="sp-icon">🌅</span>
+                <input
+                  type="range" min="0" max="24" step="0.25"
+                  value={timeOverride ?? 12}
+                  onChange={(e) => setTimeOverride(parseFloat(e.target.value))}
+                  className="sp-slider"
+                />
+                <span className="sp-icon">🌙</span>
+              </div>
+              <button className="sp-reset" onClick={() => setTimeOverride(null)}>
+                Reset to real time
+              </button>
+            </div>
+
+            {/* Weather */}
+            <div className="sp-section">
+              <div className="sp-label">Weather</div>
+              <div className="sp-weather-grid">
+                {WEATHER_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.label}
+                    className={`sp-weather-btn ${
+                      (weatherOverride === opt.value) ||
+                      (opt.value === null && weatherOverride === null) ? 'active' : ''
+                    }`}
+                    onClick={() => setWeatherOverride(opt.value)}
+                  >
+                    <span>{opt.emoji}</span>
+                    <span className="sp-weather-name">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quality */}
+            <div className="sp-section">
+              <div className="sp-label">Graphics Quality</div>
+              <div className="sp-quality-row">
+                {['low', 'medium', 'high'].map((lv) => (
+                  <button
+                    key={lv}
+                    className={`sp-quality-btn ${qualityLevel === lv ? 'active' : ''}`}
+                    onClick={() => { setQualityLevel(lv); setAutoQuality(false); }}
+                  >
+                    {lv.charAt(0).toUpperCase() + lv.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Reduce motion */}
+            <div className="sp-section sp-toggle-row">
+              <span className="sp-label" style={{ marginBottom: 0 }}>Reduce Motion</span>
+              <button
+                className={`sp-toggle ${reducedMotion ? 'on' : ''}`}
+                onClick={() => setReducedMotion(!reducedMotion)}
+              >
+                <span className="sp-toggle-knob" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * AboutSection.jsx — Bio, skills, resume link, social links.
+ * Content comes from src/data/portfolio.js (ABOUT, SKILLS, SOCIAL).
+ */
+
+export default function AboutSection({ about, skills, social }) {
+  return (
+    <section className="pp-section">
+      {/* Bio */}
+      <div className="pp-about-bio">
+        {about.profileImage && (
+          <img
+            src={about.profileImage}
+            alt={about.name}
+            className="pp-profile-img"
+            loading="lazy"
+          />
+        )}
+        <div className="pp-bio-text">
+          {about.bio.map((paragraph, i) => (
+            <p key={i}>{paragraph}</p>
+          ))}
+        </div>
+      </div>
+
+      {/* Resume link */}
+      {about.resumeUrl && (
+        <a
+          href={about.resumeUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="pp-resume-link"
+        >
+          Download CV / Resume ↗
+        </a>
+      )}
+
+      {/* Skills grid */}
+      <h3 className="pp-subsection-title">Skills & Tools</h3>
+      <div className="pp-skills-grid">
+        {skills.map((group) => (
+          <div key={group.category} className="pp-skill-group">
+            <h4 className="pp-skill-category">{group.category}</h4>
+            <ul className="pp-skill-list">
+              {group.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+
+
+
+
+
+
+/**
+ * ContactSection.jsx — Contact form with Formspree or mailto fallback.
+ *
+ * HOW IT WORKS:
+ *   - If CONTACT.formspreeId is set → submits via Formspree (free, no backend)
+ *   - If not → falls back to a mailto: link
+ *
+ * HOW TO SET UP FORMSPREE:
+ *   1. Go to https://formspree.io and create a free account
+ *   2. Create a new form and copy the form ID (e.g. 'xpznqkdl')
+ *   3. Set CONTACT.formspreeId in src/data/portfolio.js
+ */
+
+import { useState } from 'react';
+
+export default function ContactSection({ contact, social }) {
+  const [formState, setFormState] = useState('idle'); // idle, sending, sent, error
+  const [formData, setFormData] = useState({ name: '', email: '', message: '' });
+
+  const hasFormspree = !!contact.formspreeId;
+  const formAction = hasFormspree
+    ? `https://formspree.io/f/${contact.formspreeId}`
+    : null;
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!hasFormspree) {
+      // Fallback: open mailto link
+      const subject = encodeURIComponent(`Portfolio Contact: ${formData.name}`);
+      const body = encodeURIComponent(`From: ${formData.name} (${formData.email})\n\n${formData.message}`);
+      window.open(`mailto:${contact.email}?subject=${subject}&body=${body}`);
+      return;
+    }
+
+    // Submit via Formspree
+    setFormState('sending');
+    try {
+      const res = await fetch(formAction, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      if (res.ok) {
+        setFormState('sent');
+        setFormData({ name: '', email: '', message: '' });
+      } else {
+        setFormState('error');
+      }
+    } catch {
+      setFormState('error');
+    }
+  };
+
+  return (
+    <section className="pp-section">
+      <h2 className="pp-section-title">{contact.heading}</h2>
+      <p className="pp-section-desc">{contact.subheading}</p>
+
+      <form className="contact-form" onSubmit={handleSubmit}>
+        <div className="cf-field">
+          <label htmlFor="cf-name">Name</label>
+          <input
+            id="cf-name"
+            name="name"
+            type="text"
+            required
+            placeholder="Your name"
+            value={formData.name}
+            onChange={handleChange}
+            disabled={formState === 'sending'}
+          />
+        </div>
+
+        <div className="cf-field">
+          <label htmlFor="cf-email">Email</label>
+          <input
+            id="cf-email"
+            name="email"
+            type="email"
+            required
+            placeholder="you@example.com"
+            value={formData.email}
+            onChange={handleChange}
+            disabled={formState === 'sending'}
+          />
+        </div>
+
+        <div className="cf-field">
+          <label htmlFor="cf-message">Message</label>
+          <textarea
+            id="cf-message"
+            name="message"
+            required
+            rows="5"
+            placeholder="What's on your mind?"
+            value={formData.message}
+            onChange={handleChange}
+            disabled={formState === 'sending'}
+          />
+        </div>
+
+        <button
+          type="submit"
+          className="cf-submit"
+          disabled={formState === 'sending'}
+        >
+          {formState === 'sending' ? 'Sending...' :
+           formState === 'sent' ? '✓ Sent!' :
+           hasFormspree ? 'Send Message' : 'Open in Email Client'}
+        </button>
+
+        {formState === 'error' && (
+          <p className="cf-error">Something went wrong. Please try again or email directly.</p>
+        )}
+
+        {!hasFormspree && (
+          <p className="cf-note">
+            Tip: Set up <a href="https://formspree.io" target="_blank" rel="noopener noreferrer">Formspree</a> for
+            a built-in contact form. See <code>src/data/portfolio.js</code> → CONTACT.formspreeId
+          </p>
+        )}
+      </form>
+
+      {/* Social links */}
+      <div className="contact-social">
+        <h3 className="pp-subsection-title">Find me elsewhere</h3>
+        <div className="cs-links">
+          {social.map((s) => (
+            <a
+              key={s.platform}
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="cs-link"
+            >
+              <span className="cs-icon">{s.icon}</span>
+              <span>{s.platform}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * DiarySection.jsx — Digital Diary / Scrapbook.
+ * Content comes from src/data/diary.js.
+ *
+ * Features:
+ *   - Filter by entry type (sketch, idea, render, thought, wip, note)
+ *   - Newest-first display
+ *   - Each entry shows date, type badge, title, content, and optional image
+ */
+
+import { useState } from 'react';
+
+export default function DiarySection({ entries, types }) {
+  const [filter, setFilter] = useState(null); // null = show all
+
+  const filtered = filter
+    ? entries.filter((e) => e.type === filter)
+    : entries;
+
+  return (
+    <section className="pp-section">
+      <h2 className="pp-section-title">Digital Diary</h2>
+      <p className="pp-section-desc">
+        Sketches, ideas, renders, thoughts, and works-in-progress.
+      </p>
+
+      {/* Filter tabs */}
+      <div className="diary-filters">
+        <button
+          className={`diary-filter-btn ${filter === null ? 'active' : ''}`}
+          onClick={() => setFilter(null)}
+        >
+          All
+        </button>
+        {Object.entries(types).map(([key, val]) => (
+          <button
+            key={key}
+            className={`diary-filter-btn ${filter === key ? 'active' : ''}`}
+            onClick={() => setFilter(key)}
+          >
+            {val.emoji} {val.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Entries list */}
+      <div className="diary-entries">
+        {filtered.length === 0 && (
+          <p className="diary-empty">No entries yet for this filter.</p>
+        )}
+        {filtered.map((entry) => (
+          <article key={entry.id} className="diary-entry">
+            <div className="de-header">
+              <div className="de-meta">
+                <span className="de-type-badge" data-type={entry.type}>
+                  {types[entry.type]?.emoji} {types[entry.type]?.label}
+                </span>
+                <time className="de-date" dateTime={entry.date}>
+                  {new Date(entry.date).toLocaleDateString('en-US', {
+                    month: 'short', day: 'numeric', year: 'numeric',
+                  })}
+                </time>
+              </div>
+              {entry.mood && <span className="de-mood">{entry.mood}</span>}
+            </div>
+
+            <h3 className="de-title">{entry.title}</h3>
+            <p className="de-content">{entry.content}</p>
+
+            {entry.image && (
+              <img
+                src={entry.image}
+                alt={entry.title}
+                className="de-image"
+                loading="lazy"
+              />
+            )}
+
+            {entry.tags && entry.tags.length > 0 && (
+              <div className="de-tags">
+                {entry.tags.map((tag) => (
+                  <span key={tag} className="de-tag">#{tag}</span>
+                ))}
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔════════════════════════════════════════════════════════════════╗
+ * ║  PortfolioOverlay.jsx — Slide-in portfolio panel system       ║
+ * ╚════════════════════════════════════════════════════════════════╝
+ *
+ * This is the main portfolio UI that slides in from the right.
+ * It contains tabs for: About, Projects, Diary, Contact.
+ *
+ * HOW TO EDIT:
+ *   - Content comes from src/data/portfolio.js and src/data/diary.js
+ *   - Section components are in src/components/portfolio/
+ *   - To add a new tab, add to the TABS array and create a section component
+ */
+
+import { useState, useEffect } from 'react';
+import { ABOUT, PROJECTS, SKILLS, SOCIAL, CONTACT, SITE } from '../../data/portfolio';
+import { DIARY_ENTRIES, DIARY_ENTRY_TYPES } from '../../data/diary';
+import ProjectCard from './ProjectCard';
+import AboutSection from './AboutSection';
+import DiarySection from './DiarySection';
+import ContactSection from './ContactSection';
+
+// ── Tab definitions — add new tabs here ──
+const TABS = [
+  { id: 'about',    label: 'About',    icon: '◐' },
+  { id: 'projects', label: 'Work',     icon: '◈' },
+  { id: 'diary',    label: 'Diary',    icon: '◉' },
+  { id: 'contact',  label: 'Contact',  icon: '◌' },
+];
+
+export default function PortfolioOverlay({ isOpen, onClose }) {
+  const [activeTab, setActiveTab] = useState('about');
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
+
+  // Prevent scroll bleed to canvas when panel is open
+  useEffect(() => {
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [isOpen]);
+
+  return (
+    <>
+      {/* Backdrop — click to close */}
+      <div
+        className={`portfolio-backdrop ${isOpen ? 'open' : ''}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Slide-in panel */}
+      <div
+        className={`portfolio-panel ${isOpen ? 'open' : ''}`}
+        role="dialog"
+        aria-label="Portfolio"
+        aria-modal="true"
+      >
+        {/* Header */}
+        <header className="pp-header">
+          <div>
+            <h1 className="pp-name">{ABOUT.name}</h1>
+            <p className="pp-tagline">{ABOUT.tagline}</p>
+          </div>
+          <button className="pp-close" onClick={onClose} aria-label="Close portfolio">✕</button>
+        </header>
+
+        {/* Tab navigation */}
+        <nav className="pp-tabs" role="tablist">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`pp-tab ${activeTab === tab.id ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <span className="pp-tab-icon">{tab.icon}</span>
+              <span className="pp-tab-label">{tab.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {/* Tab content (scrollable) */}
+        <div className="pp-content">
+          {activeTab === 'about' && (
+            <AboutSection about={ABOUT} skills={SKILLS} social={SOCIAL} />
+          )}
+
+          {activeTab === 'projects' && (
+            <section className="pp-section">
+              <h2 className="pp-section-title">Selected Work</h2>
+              <div className="pp-projects-grid">
+                {PROJECTS.map((project) => (
+                  <ProjectCard key={project.id} project={project} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'diary' && (
+            <DiarySection entries={DIARY_ENTRIES} types={DIARY_ENTRY_TYPES} />
+          )}
+
+          {activeTab === 'contact' && (
+            <ContactSection contact={CONTACT} social={SOCIAL} />
+          )}
+        </div>
+
+        {/* Footer */}
+        <footer className="pp-footer">
+          <span>© {new Date().getFullYear()} {ABOUT.name}</span>
+          <div className="pp-social-row">
+            {SOCIAL.map((s) => (
+              <a
+                key={s.platform}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pp-social-link"
+                title={s.platform}
+              >
+                {s.icon}
+              </a>
+            ))}
+          </div>
+        </footer>
+      </div>
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+/**
+ * ProjectCard.jsx — A single project in the portfolio grid.
+ * Content comes from the PROJECTS array in src/data/portfolio.js.
+ */
+
+export default function ProjectCard({ project }) {
+  return (
+    <article className="project-card" style={{ '--card-accent': project.color }}>
+      {/* Image area (or color fallback) */}
+      <div className="pc-image-area">
+        {project.image ? (
+          <img src={project.image} alt={project.title} loading="lazy" />
+        ) : (
+          <div className="pc-image-placeholder">
+            <span className="pc-placeholder-icon">◈</span>
+          </div>
+        )}
+        <span className="pc-category-badge">{project.category}</span>
+      </div>
+
+      {/* Text content */}
+      <div className="pc-body">
+        <h3 className="pc-title">{project.title}</h3>
+        <p className="pc-description">{project.description}</p>
+
+        {/* Tags */}
+        {project.tags && project.tags.length > 0 && (
+          <div className="pc-tags">
+            {project.tags.map((tag) => (
+              <span key={tag} className="pc-tag">{tag}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Links */}
+        <div className="pc-links">
+          {project.liveUrl && (
+            <a href={project.liveUrl} target="_blank" rel="noopener noreferrer" className="pc-link">
+              Live ↗
+            </a>
+          )}
+          {project.githubUrl && (
+            <a href={project.githubUrl} target="_blank" rel="noopener noreferrer" className="pc-link">
+              Code ↗
+            </a>
+          )}
+          {project.caseStudyUrl && (
+            <a href={project.caseStudyUrl} target="_blank" rel="noopener noreferrer" className="pc-link">
+              Case Study ↗
+            </a>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+
+
+
+
+
+
+
+import useStore from '../../store/useStore';
+
+export default function InfoPanel() {
+  const activeObject = useStore((s) => s.activeObject);
+  const clearActiveObject = useStore((s) => s.clearActiveObject);
+
+  return (
+    <div className={`game-panel ${activeObject ? 'visible' : ''}`} id="info-panel">
+      {activeObject && (
+        <>
+          <div className="gp-header">
+            <div className="gp-category">{activeObject.category}</div>
+            <button className="gp-close" onClick={clearActiveObject} aria-label="Close">✕</button>
+          </div>
+          <h2 className="gp-title">{activeObject.title}</h2>
+          <div className="gp-divider" />
+          <p className="gp-desc">{activeObject.description}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import { useRef, useMemo } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { Text } from '@react-three/drei';
+import * as THREE from 'three';
+import useStore from '../../store/useStore';
+
+export default function NavigationOrbs({ items }) {
+  const hoveredObject = useStore((s) => s.hoveredObject);
+  const reducedMotion = useStore((s) => s.reducedMotion);
+
+  return (
+    <group>
+      {items.map((item) => (
+        <Orb key={item.id} item={item} isHovered={hoveredObject === item.id} reducedMotion={reducedMotion} />
+      ))}
+    </group>
+  );
+}
+
+function Orb({ item, isHovered, reducedMotion }) {
+  const meshRef = useRef();
+  const color = useMemo(() => new THREE.Color(item.color), [item.color]);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    const t = clock.getElapsedTime();
+    if (!reducedMotion) {
+      meshRef.current.position.y = 2.2 + Math.sin(t * 2 + item.position[0]) * 0.1;
+    }
+    // Pulse emissive
+    const pulse = isHovered ? 1.5 : 0.5 + Math.sin(t * 3) * 0.3;
+    meshRef.current.material.emissiveIntensity = pulse;
+  });
+
+  return (
+    <group position={[item.position[0], 0, item.position[2]]}>
+      <mesh ref={meshRef} position={[0, 2.2, 0]}>
+        <sphereGeometry args={[0.05, 16, 12]} />
+        <meshStandardMaterial
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.5}
+          transparent
+          opacity={0.8}
+        />
+      </mesh>
+
+      {/* Label on hover */}
+      {isHovered && (
+        <Text
+          position={[0, 2.5, 0]}
+          fontSize={0.12}
+          color={item.color}
+          anchorX="center"
+          anchorY="bottom"
+          font="https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfMZhrib2Bg-4.ttf"
+        >
+          {item.category}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+import { useEffect, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { PerformanceMonitor } from '@react-three/drei';
+import useStore from '../store/useStore';
+import { getUserLocation } from '../utils/geolocation';
+import { fetchWeather } from '../utils/weather';
+import { getSunPositionVector, getTimeOfDayFactor, getSkyParameters } from '../utils/sunCalc';
+import { PROJECTS } from '../data/portfolio';
+
+import WalkController from './balcony/WalkController';
+import BalconyStructure from './balcony/BalconyStructure';
+import CozyElements from './balcony/CozyElements';
+import DisplayPedestal from './balcony/DisplayPedestal';
+import PortfolioObject from './balcony/PortfolioObject';
+import ProductDesign from './balcony/items/ProductDesign';
+import KineticSculpture from './balcony/items/KineticSculpture';
+import ResearchPaper from './balcony/items/ResearchPaper';
+import DynamicSky from './environment/DynamicSky';
+import DynamicLighting from './environment/DynamicLighting';
+import Campus from './environment/Campus';
+import WeatherEffects from './environment/WeatherEffects';
+import PostEffects from './environment/PostEffects';
+import HorizonTerrain from './horizon/HorizonTerrain';
+import AtmosphericFog from './horizon/AtmosphericFog';
+import NavigationOrbs from './ui/NavigationOrbs';
+import Fireflies from './extras/Fireflies';
+import ShootingStars from './extras/ShootingStars';
+import DistantCityLights from './extras/DistantCityLights';
+import SoundscapeManager from './audio/SoundscapeManager';
+
+// Portfolio items from centralized data — edit in src/data/portfolio.js
+// Only items with a `position` field get a 3D representation
+const PORTFOLIO_ITEMS = PROJECTS.filter((p) => p.position);
+
+export default function SceneController() {
+  const setSunPosition = useStore((s) => s.setSunPosition);
+  const setTimeOfDay = useStore((s) => s.setTimeOfDay);
+  const setIsNight = useStore((s) => s.setIsNight);
+  const setWeather = useStore((s) => s.setWeather);
+  const setLiveWeather = useStore((s) => s.setLiveWeather);
+  const setUserLocation = useStore((s) => s.setUserLocation);
+  const setIsLoaded = useStore((s) => s.setIsLoaded);
+  const setQualityLevel = useStore((s) => s.setQualityLevel);
+  const autoQuality = useStore((s) => s.autoQuality);
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const userLocation = useStore((s) => s.userLocation);
+  const timeOverride = useStore((s) => s.timeOverride);
+  const weatherOverride = useStore((s) => s.weatherOverride);
+  const liveWeather = useStore((s) => s.liveWeather);
+  const lastUpdate = useRef(0);
+
+  const computeSun = (date, lat, lon) => {
+    let d = date;
+    if (timeOverride !== null) {
+      d = new Date(date);
+      d.setHours(Math.floor(timeOverride), (timeOverride % 1) * 60, 0);
+    }
+    setSunPosition(getSunPositionVector(d, lat, lon));
+    setTimeOfDay(getTimeOfDayFactor(d, lat, lon));
+    setIsNight(getSkyParameters(d, lat, lon).isNight);
+  };
+
+  // Apply weather override — preserve real data, only swap the condition
+  useEffect(() => {
+    if (weatherOverride && liveWeather) {
+      setWeather({ ...liveWeather, condition: weatherOverride });
+    } else if (weatherOverride) {
+      // No live data yet — use defaults with override condition
+      setWeather({ condition: weatherOverride, temperature: 25, humidity: 50, windSpeed: 3, cloudCover: 0 });
+    } else if (liveWeather) {
+      setWeather(liveWeather);
+    }
+  }, [weatherOverride, liveWeather, setWeather]);
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const loc = await getUserLocation();
+      if (dead) return;
+      setUserLocation(loc);
+      computeSun(new Date(), loc.lat, loc.lon);
+      const w = await fetchWeather(loc.lat, loc.lon);
+      if (dead) return;
+      setLiveWeather(w);
+      if (!weatherOverride) setWeather(w);
+      setTimeout(() => { if (!dead) setIsLoaded(true); }, 600);
+    })();
+    return () => { dead = true; };
+  }, []);
+
+  useEffect(() => {
+    if (userLocation) computeSun(new Date(), userLocation.lat, userLocation.lon);
+  }, [timeOverride, userLocation]);
+
+  useEffect(() => {
+    if (!userLocation) return;
+    const id = setInterval(async () => {
+      try {
+        const w = await fetchWeather(userLocation.lat, userLocation.lon);
+        setLiveWeather(w);
+      } catch (err) {
+        console.warn('Weather refresh failed:', err);
+      }
+    }, 600000);
+    return () => clearInterval(id);
+  }, [userLocation, setLiveWeather]);
+
+  useFrame(({ clock }) => {
+    if (!userLocation || timeOverride !== null) return;
+    const now = Date.now();
+    if (now - lastUpdate.current > 30000) {
+      lastUpdate.current = now;
+
+      computeSun(new Date(), userLocation.lat, userLocation.lon);
+    }
+  });
+
+  return (
+    <>
+      <PerformanceMonitor
+        onDecline={() => {
+          if (!autoQuality) return;
+          const l = ['high', 'medium', 'low'];
+          const i = l.indexOf(qualityLevel);
+          if (i < 2) setQualityLevel(l[i + 1]);
+        }}
+        onIncline={() => {
+          if (!autoQuality) return;
+          const l = ['high', 'medium', 'low'];
+          const i = l.indexOf(qualityLevel);
+          if (i > 0) setQualityLevel(l[i - 1]);
+        }}
+      />
+
+      <WalkController />
+      <DynamicSky />
+      <DynamicLighting />
+      <AtmosphericFog />
+      <WeatherEffects />
+      <Campus />
+      <BalconyStructure />
+      <CozyElements />
+
+      {PORTFOLIO_ITEMS.map((item) => (
+        <group key={item.id} position={item.position}>
+          <DisplayPedestal color={item.color} />
+          <PortfolioObject item={item}>
+            {item.id === 'product-design' && <ProductDesign />}
+            {item.id === 'kinetic-sculpture' && <KineticSculpture />}
+            {item.id === 'research-papers' && <ResearchPaper />}
+          </PortfolioObject>
+        </group>
+      ))}
+
+      <NavigationOrbs items={PORTFOLIO_ITEMS} />
+      <HorizonTerrain />
+      <Fireflies />
+      <ShootingStars />
+      <DistantCityLights />
+      <SoundscapeManager />
+      <PostEffects />
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+export const WEATHER_PARTICLES = {
+    rain: 2000,
+    snow: 1500,
+    drizzle: 500,
+};
+
+export const FOG_LEVELS = {
+    clear: 0.001,
+    rain: 0.008,
+    fog: 0.015,
+};
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * Theme Configuration — The Balcony Spatial Portfolio
+ * 
+ * Change palettes here to restyle the entire experience.
+ * Each palette defines colors for both CSS (hex strings) and Three.js (hex integers).
+ */
+
+const palettes = {
+  // Default: warm architectural terracotta
+  warmTerra: {
+    name: 'Warm Terra',
+    primary:       '#D4A574',   // warm sand
+    primaryInt:    0xD4A574,
+    secondary:     '#8B6F47',   // dark wood
+    secondaryInt:  0x8B6F47,
+    accent:        '#E8C4A0',   // light peach
+    accentInt:     0xE8C4A0,
+    highlight:     '#FF9F6B',   // warm orange glow
+    highlightInt:  0xFF9F6B,
+    emissive:      '#FFD4A8',   // emissive glow
+    emissiveInt:   0xFFD4A8,
+    ground:        '#3D2B1F',   // dark earth
+    groundInt:     0x3D2B1F,
+    metal:         '#B8A89A',   // brushed metal
+    metalInt:      0xB8A89A,
+    glass:         '#C4D4E0',   // frosted glass
+    glassInt:      0xC4D4E0,
+    text:          '#F5E6D3',   // warm white
+    textInt:       0xF5E6D3,
+    fogDay:        '#E8D5C4',
+    fogDayInt:     0xE8D5C4,
+    fogNight:      '#1A1A2E',
+    fogNightInt:   0x1A1A2E,
+    skyNight:      '#0D1B2A',
+    skyNightInt:   0x0D1B2A,
+    moonlight:     '#C4D4FF',
+    moonlightInt:  0xC4D4FF,
+    sunGolden:     '#FFB347',
+    sunGoldenInt:  0xFFB347,
+    uiBackground:  'rgba(30, 20, 15, 0.75)',
+    uiBorder:      'rgba(212, 165, 116, 0.3)',
+  },
+
+  // Alternative: cool midnight blue
+  coolMidnight: {
+    name: 'Cool Midnight',
+    primary:       '#6B8FA3',
+    primaryInt:    0x6B8FA3,
+    secondary:     '#3D5A6E',
+    secondaryInt:  0x3D5A6E,
+    accent:        '#A0C4D4',
+    accentInt:     0xA0C4D4,
+    highlight:     '#6BC5FF',
+    highlightInt:  0x6BC5FF,
+    emissive:      '#A8D4FF',
+    emissiveInt:   0xA8D4FF,
+    ground:        '#1F2D3D',
+    groundInt:     0x1F2D3D,
+    metal:         '#9AA8B8',
+    metalInt:      0x9AA8B8,
+    glass:         '#D0E0F0',
+    glassInt:      0xD0E0F0,
+    text:          '#D3E6F5',
+    textInt:       0xD3E6F5,
+    fogDay:        '#C4D5E8',
+    fogDayInt:     0xC4D5E8,
+    fogNight:      '#0A1628',
+    fogNightInt:   0x0A1628,
+    skyNight:      '#0A1628',
+    skyNightInt:   0x0A1628,
+    moonlight:     '#C4D4FF',
+    moonlightInt:  0xC4D4FF,
+    sunGolden:     '#FFD47B',
+    sunGoldenInt:  0xFFD47B,
+    uiBackground:  'rgba(15, 20, 30, 0.75)',
+    uiBorder:      'rgba(107, 143, 163, 0.3)',
+  },
+
+  // Alternative: forest green
+  forestMoss: {
+    name: 'Forest Moss',
+    primary:       '#7A9E7E',
+    primaryInt:    0x7A9E7E,
+    secondary:     '#4A6B4E',
+    secondaryInt:  0x4A6B4E,
+    accent:        '#A8C4A0',
+    accentInt:     0xA8C4A0,
+    highlight:     '#6BFF8F',
+    highlightInt:  0x6BFF8F,
+    emissive:      '#A8FFD4',
+    emissiveInt:   0xA8FFD4,
+    ground:        '#1F2D1F',
+    groundInt:     0x1F2D1F,
+    metal:         '#8A9A88',
+    metalInt:      0x8A9A88,
+    glass:         '#D0E8D4',
+    glassInt:      0xD0E8D4,
+    text:          '#E6F5E3',
+    textInt:       0xE6F5E3,
+    fogDay:        '#D4E8D0',
+    fogDayInt:     0xD4E8D0,
+    fogNight:      '#0A1A0E',
+    fogNightInt:   0x0A1A0E,
+    skyNight:      '#0A160E',
+    skyNightInt:   0x0A160E,
+    moonlight:     '#D4FFC4',
+    moonlightInt:  0xD4FFC4,
+    sunGolden:     '#FFD47B',
+    sunGoldenInt:  0xFFD47B,
+    uiBackground:  'rgba(15, 25, 15, 0.75)',
+    uiBorder:      'rgba(122, 158, 126, 0.3)',
+  },
+};
+
+// ═══════════════════════════════════════════
+// ACTIVE PALETTE — Change this to swap themes
+// ═══════════════════════════════════════════
+const ACTIVE_PALETTE = 'warmTerra';
+
+export const theme = palettes[ACTIVE_PALETTE];
+export const allPalettes = palettes;
+export const activePaletteName = ACTIVE_PALETTE;
+
+// Helper: interpolate between two hex colors
+export function lerpColor(hex1, hex2, t) {
+  const r1 = (hex1 >> 16) & 0xff, g1 = (hex1 >> 8) & 0xff, b1 = hex1 & 0xff;
+  const r2 = (hex2 >> 16) & 0xff, g2 = (hex2 >> 8) & 0xff, b2 = hex2 & 0xff;
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return (r << 16) | (g << 8) | b;
+}
+
+// Helper: apply theme as CSS custom properties
+export function applyThemeToDOM(palette = theme) {
+  const root = document.documentElement;
+  root.style.setProperty('--color-primary', palette.primary);
+  root.style.setProperty('--color-secondary', palette.secondary);
+  root.style.setProperty('--color-accent', palette.accent);
+  root.style.setProperty('--color-highlight', palette.highlight);
+  root.style.setProperty('--color-text', palette.text);
+  root.style.setProperty('--color-ui-bg', palette.uiBackground);
+  root.style.setProperty('--color-ui-border', palette.uiBorder);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔════════════════════════════════════════════════════════════════╗
+ * ║  diary.js — Your Digital Diary / Scrapbook entries            ║
+ * ╚════════════════════════════════════════════════════════════════╝
+ *
+ * HOW TO ADD A NEW ENTRY:
+ *   1. Copy the template below
+ *   2. Paste it at the TOP of the DIARY_ENTRIES array (newest first)
+ *   3. Fill in the fields
+ *   4. Save — the site will automatically show it
+ *
+ * TEMPLATE (copy this):
+ *
+ *   {
+ *     id: 'unique-slug',            // URL-safe ID, must be unique
+ *     date: '2026-04-04',           // YYYY-MM-DD format
+ *     title: 'Entry Title',         // Short title
+ *     type: 'sketch',              // One of: sketch, idea, render, thought, wip, note
+ *     tags: ['tag1', 'tag2'],       // Freeform tags for filtering
+ *     content: 'Your text here. Supports **markdown** formatting.',
+ *     image: null,                  // Path to image: '/diary/my-sketch.jpg' (put file in /public/diary/)
+ *     mood: '🌤️',                  // Optional emoji to set the mood
+ *   },
+ *
+ * ENTRY TYPES (used for filtering + visual style):
+ *   'sketch'   → 🎨  Quick drawings, doodles
+ *   'idea'     → 💡  Concepts, brainstorms
+ *   'render'   → 🖼️  3D renders, final visuals
+ *   'thought'  → 💭  Reflections, musings
+ *   'wip'      → 🔧  Work-in-progress updates
+ *   'note'     → 📝  General notes
+ */
+
+export const DIARY_ENTRY_TYPES = {
+  sketch:  { label: 'Sketch',  emoji: '🎨' },
+  idea:    { label: 'Idea',    emoji: '💡' },
+  render:  { label: 'Render',  emoji: '🖼️' },
+  thought: { label: 'Thought', emoji: '💭' },
+  wip:     { label: 'WIP',     emoji: '🔧' },
+  note:    { label: 'Note',    emoji: '📝' },
+};
+
+// ═══════════════════════════════════════
+// DIARY ENTRIES — newest first
+// ═══════════════════════════════════════
+// Just add new objects to this array. The site handles everything else.
+
+export const DIARY_ENTRIES = [
+  // ─── Example entries (replace with your own) ───
+  {
+    id: 'balcony-concept-v2',
+    date: '2026-04-04',
+    title: 'The Balcony — Spatial Portfolio Concept',
+    type: 'idea',
+    tags: ['portfolio', 'webgl', 'spatial-design'],
+    content: 'Exploring the idea of a portfolio as a **physical space** rather than a flat page. The balcony metaphor works well — it\'s a place to observe, reflect, and display work. The horizon represents everything I haven\'t yet explored.',
+    image: null,
+    mood: '🌅',
+  },
+  {
+    id: 'first-render-test',
+    date: '2026-04-03',
+    title: 'First Render Test',
+    type: 'render',
+    tags: ['3d', 'three.js', 'r3f'],
+    content: 'Got the basic scene running. Stone floor, wrought iron railings, cozy string lights. The Tiny Glade aesthetic is coming through nicely. Need to work on tree canopies next — they\'re z-fighting.',
+    image: null,
+    mood: '✨',
+  },
+  {
+    id: 'kinetic-sculpture-idea',
+    date: '2026-04-02',
+    title: 'Nested Ring Sculpture',
+    type: 'sketch',
+    tags: ['kinetic', 'sculpture', 'mechanical'],
+    content: 'Three concentric torus rings rotating on different axes. The inner icosahedron pulses with emissive light. Inspired by gimbal mechanisms and armillary spheres.',
+    image: null,
+    mood: '⚙️',
+  },
+  {
+    id: 'weather-system-notes',
+    date: '2026-04-01',
+    title: 'Live Weather Integration Notes',
+    type: 'note',
+    tags: ['api', 'weather', 'open-meteo'],
+    content: 'Using Open-Meteo API — completely free, no key needed. Maps weather codes to scene conditions. Rain spawns particle effects, clouds change turbidity, fog adjusts scene density. The goal: the portfolio reflects the viewer\'s real-world conditions.',
+    image: null,
+    mood: '🌧️',
+  },
+
+  // ─── ADD YOUR NEW ENTRIES ABOVE THIS LINE ───
+];
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║  portfolio.js — ALL your portfolio content lives here           ║
+ * ╚══════════════════════════════════════════════════════════════════╝
+ *
+ * HOW TO EDIT:
+ *   This is the ONLY file you need to change to update your portfolio content.
+ *   Each section is clearly labeled. Just edit the strings, add/remove items.
+ *   No component or CSS knowledge needed.
+ *
+ * STRUCTURE:
+ *   ABOUT      → Your bio, tagline, skills
+ *   PROJECTS   → Your portfolio projects (shown both in 3D and in the overlay)
+ *   SKILLS     → Technical skills grouped by category
+ *   SOCIAL     → Your social media links
+ *   CONTACT    → Contact form settings
+ *   SITE       → Site-wide metadata (title, description)
+ */
+
+// ═══════════════════════════════════════
+// SITE METADATA
+// ═══════════════════════════════════════
+// Used in <title>, meta tags, loading screen, etc.
+export const SITE = {
+  title: 'The Balcony — A Spatial Portfolio',
+  shortTitle: 'The Balcony',
+  description: 'An immersive 3D portfolio experience showcasing creative technology, product design, and research.',
+  author: 'Your Name',           // ← EDIT: Put your name here
+  url: 'https://yoursite.com',   // ← EDIT: Your live URL (for OpenGraph)
+};
+
+// ═══════════════════════════════════════
+// ABOUT / BIO
+// ═══════════════════════════════════════
+export const ABOUT = {
+  name: 'Your Name',             // ← EDIT: Your full name
+  tagline: 'Creative Technologist & Designer',  // ← EDIT: One-liner that describes you
+  bio: [
+    // Each string becomes a paragraph. Add or remove lines freely.
+    'I\'m a creative technologist who works at the intersection of design, engineering, and art. I believe the best work happens when you stop separating disciplines and start connecting them.',
+    'My practice spans product design, kinetic sculpture, computational research, and interactive experiences. I\'m drawn to things that move, things that respond, and things that make you pause.',
+    'Currently exploring spatial computing, procedural design, and the poetics of everyday objects.',
+  ],
+  // Path to your profile image. Place the image in /public/ folder.
+  // Example: put "profile.jpg" in /public/ and set this to "/profile.jpg"
+  profileImage: null,  // ← EDIT: Set to '/your-image.jpg' when ready
+  resumeUrl: null,     // ← EDIT: Set to '/resume.pdf' or an external link
+};
+
+// ═══════════════════════════════════════
+// PROJECTS
+// ═══════════════════════════════════════
+// These are shown BOTH as 3D objects on the balcony AND in the portfolio overlay.
+// The `id` must match the 3D object mapping in SceneController.jsx.
+//
+// HOW TO ADD A NEW PROJECT:
+// 1. Add an entry to this array
+// 2. The portfolio overlay will automatically show it
+// 3. To also add a 3D representation, see SceneController.jsx
+export const PROJECTS = [
+  {
+    id: 'product-design',
+    title: 'Product Design Collection',
+    category: 'Product Design',
+    description: 'A curated series of industrial and consumer product designs — exploring the intersection of form, function, and material innovation.',
+    // Tags shown as badges on the project card
+    tags: ['Industrial Design', 'CAD', 'Prototyping'],
+    // Optional links. Set to null if not available.
+    liveUrl: null,            // ← EDIT: 'https://...'
+    githubUrl: null,          // ← EDIT: 'https://github.com/...'
+    caseStudyUrl: null,       // ← EDIT: Link to a detailed write-up
+    // Image path for the overlay card. Place in /public/projects/
+    image: null,              // ← EDIT: '/projects/product-design.jpg'
+    // Color used for the 3D pedestal glow + card accent
+    color: '#FF9F6B',
+    // Position on the balcony floor [x, y, z]
+    position: [-2.5, 0, -1.5],
+  },
+  {
+    id: 'kinetic-sculpture',
+    title: 'Kinetic Sculptures',
+    category: 'Kinetic Art',
+    description: 'Mechanical art pieces that transform motion into visual poetry. Each sculpture explores the rhythmic language of gears, pendulums, and balanced forces.',
+    tags: ['Mechanical Design', 'Art', 'Motion'],
+    liveUrl: null,
+    githubUrl: null,
+    caseStudyUrl: null,
+    image: null,
+    color: '#6BC5FF',
+    position: [1.8, 0, -2],
+  },
+  {
+    id: 'research-papers',
+    title: 'Research & Publications',
+    category: 'Research',
+    description: 'Academic research spanning computational design, human-computer interaction, and the philosophy of creative technology.',
+    tags: ['HCI', 'Computational Design', 'Publications'],
+    liveUrl: null,
+    githubUrl: null,
+    caseStudyUrl: null,
+    image: null,
+    color: '#A8FFD4',
+    position: [3.5, 0, 1.5],
+  },
+  // ─── ADD MORE PROJECTS HERE ───
+  // Copy an entry above, change the id, and fill in your details.
+  // If you don't need a 3D object for it, just leave it — it'll still
+  // appear in the portfolio overlay panel.
+];
+
+// ═══════════════════════════════════════
+// SKILLS
+// ═══════════════════════════════════════
+// Grouped by category. Add/remove categories and skills freely.
+export const SKILLS = [
+  {
+    category: 'Design',
+    items: ['Product Design', 'UI/UX', 'CAD (Fusion 360, SolidWorks)', '3D Modeling', 'Sketching'],
+  },
+  {
+    category: 'Development',
+    items: ['JavaScript / TypeScript', 'React', 'Three.js / WebGL', 'Python', 'Node.js'],
+  },
+  {
+    category: 'Research',
+    items: ['HCI', 'Computational Design', 'User Studies', 'Academic Writing'],
+  },
+  {
+    category: 'Tools',
+    items: ['Figma', 'Blender', 'Arduino', 'Git', 'Adobe Suite'],
+  },
+];
+
+// ═══════════════════════════════════════
+// SOCIAL LINKS
+// ═══════════════════════════════════════
+// Set any link to null to hide it. Add new ones by copying a line.
+export const SOCIAL = [
+  { platform: 'GitHub',   url: 'https://github.com/yourusername',   icon: '⌨' },
+  { platform: 'LinkedIn', url: 'https://linkedin.com/in/yourusername', icon: '💼' },
+  { platform: 'Twitter',  url: 'https://twitter.com/yourusername',   icon: '🐦' },
+  { platform: 'Email',    url: 'mailto:you@example.com',             icon: '✉️' },
+  // { platform: 'Dribbble', url: 'https://dribbble.com/...', icon: '🎨' },
+  // { platform: 'Instagram', url: 'https://instagram.com/...', icon: '📸' },
+].filter(s => s.url);  // Removes any with null URLs
+
+// ═══════════════════════════════════════
+// CONTACT
+// ═══════════════════════════════════════
+export const CONTACT = {
+  // Formspree endpoint. Create a free form at https://formspree.io
+  // and paste the form ID here (just the ID, not the full URL).
+  // Example: 'xpznqkdl'
+  formspreeId: null,  // ← EDIT: Your Formspree form ID
+
+  // Fallback email if Formspree is not set up
+  email: 'you@example.com',  // ← EDIT: Your email address
+
+  // Heading shown above the contact form
+  heading: 'Get in Touch',
+  subheading: 'Have a project in mind, a question, or just want to say hello? Drop me a message.',
+};
+
+
+
+
+
+
+
+
+
+
+
+
+import { create } from 'zustand';
+
+const useStore = create((set) => ({
+  // ── Location ──
+  userLocation: null,
+  setUserLocation: (loc) => set({ userLocation: loc }),
+
+  // ── Time & Sun ──
+  sunPosition: [100, 20, 100],
+  setSunPosition: (pos) => set({ sunPosition: pos }),
+  timeOfDay: 0.5,
+  setTimeOfDay: (t) => set({ timeOfDay: t }),
+  isNight: false,
+  setIsNight: (v) => set({ isNight: v }),
+
+  // ── Manual overrides ──
+  timeOverride: null,
+  setTimeOverride: (v) => set({ timeOverride: v }),
+  weatherOverride: null,
+  setWeatherOverride: (v) => set({ weatherOverride: v }),
+
+  // ── Weather ──
+  weather: { condition: 'clear', temperature: 25, humidity: 50, windSpeed: 3, cloudCover: 0 },
+  liveWeather: null,
+  setWeather: (w) => set({ weather: w }),
+  setLiveWeather: (w) => set({ liveWeather: w }),
+
+  // ── Quality ──
+  qualityLevel: 'high',
+  setQualityLevel: (q) => set({ qualityLevel: q }),
+  autoQuality: true,
+  setAutoQuality: (v) => set({ autoQuality: v }),
+  reducedMotion: false,
+  setReducedMotion: (v) => set({ reducedMotion: v }),
+
+  // ── Audio ──
+  isMuted: true,
+  setIsMuted: (v) => set({ isMuted: v }),
+  toggleMute: () => set((s) => ({ isMuted: !s.isMuted })),
+
+  // ── Interaction ──
+  activeObject: null,
+  setActiveObject: (obj) => set({ activeObject: obj }),
+  clearActiveObject: () => set({ activeObject: null }),
+  hoveredObject: null,
+  setHoveredObject: (id) => set({ hoveredObject: id }),
+
+  // ── Drag state (used by WalkController to suppress clicks during drag) ──
+  isDragging: false,
+  setIsDragging: (v) => set({ isDragging: v }),
+
+  // ── Loading ──
+  isLoaded: false,
+  setIsLoaded: (v) => set({ isLoaded: v }),
+  loadingProgress: 0,
+  setLoadingProgress: (p) => set({ loadingProgress: p }),
+}));
+
+export default useStore;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * Geolocation utility.
+ * Priority: Browser Geolocation → IP-based fallback → Bhopal, India.
+ */
+
+// Default: Bhopal, Madhya Pradesh, India
+const FALLBACK = { lat: 23.2599, lon: 77.4126, city: 'Bhopal', country: 'India' };
+
+export async function getUserLocation() {
+  // Try browser geolocation first
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      if (!navigator.geolocation) reject(new Error('No geolocation'));
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        timeout: 8000,
+        enableHighAccuracy: false,
+      });
+    });
+
+    const { latitude: lat, longitude: lon } = pos.coords;
+
+    // Try reverse geocode for city name
+
+    return { lat, lon, city: 'Your Location', country: '' };
+  } catch (geoErr) {
+    console.log('Browser geolocation denied/unavailable, trying IP...');
+  }
+
+  // Try IP-based geolocation
+  try {
+    const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.latitude && data.longitude) {
+        return {
+          lat: data.latitude,
+          lon: data.longitude,
+          city: data.city || data.capital || 'Unknown',
+          country: data.country_name || '',
+        };
+      }
+    }
+  } catch (ipErr) {
+    console.log('IP geolocation failed, using fallback.');
+  }
+
+  return FALLBACK;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import SunCalc from 'suncalc';
+
+/**
+ * Convert sun altitude + azimuth into a Three.js world-space position vector.
+ * Returns [x, y, z] suitable for Sky sunPosition and directional light.
+ */
+export function getSunPositionVector(date, lat, lon) {
+  const pos = SunCalc.getPosition(date, lat, lon);
+  const altitude = pos.altitude; // radians, negative = below horizon
+  const azimuth = pos.azimuth;   // radians, 0 = south
+
+  // Convert spherical to cartesian on a large sphere (radius 100)
+  const r = 100;
+  const x = r * Math.cos(altitude) * Math.sin(azimuth);
+  const y = r * Math.sin(altitude);
+  const z = r * Math.cos(altitude) * Math.cos(azimuth);
+
+  return [x, y, z];
+}
+
+/**
+ * Get time-of-day factor: 0 = midnight, 0.5 = noon, 1 = midnight.
+ */
+export function getTimeOfDayFactor(date, lat, lon) {
+  const times = SunCalc.getTimes(date, lat, lon);
+  const sunrise = times.sunrise.getTime();
+  const sunset = times.sunset.getTime();
+  const now = date.getTime();
+  const solarNoon = times.solarNoon.getTime();
+
+  if (now >= sunrise && now <= sunset) {
+    // Daytime: map sunrise→noon = 0.25→0.5, noon→sunset = 0.5→0.75
+    if (now <= solarNoon) {
+      return 0.25 + 0.25 * ((now - sunrise) / (solarNoon - sunrise));
+    } else {
+      return 0.5 + 0.25 * ((now - solarNoon) / (sunset - solarNoon));
+    }
+  } else {
+    // Nighttime
+    if (now > sunset) {
+      const midnight = new Date(date);
+      midnight.setHours(24, 0, 0, 0);
+      const total = midnight.getTime() - sunset;
+      return 0.75 + 0.25 * ((now - sunset) / total);
+    } else {
+      const midnight = new Date(date);
+      midnight.setHours(0, 0, 0, 0);
+      const total = sunrise - midnight.getTime();
+      return 0.25 * ((now - midnight.getTime()) / total);
+    }
+  }
+}
+
+/**
+ * Get sky shader parameters based on sun altitude.
+ */
+export function getSkyParameters(date, lat, lon) {
+  const pos = SunCalc.getPosition(date, lat, lon);
+  const alt = pos.altitude; // radians
+  const altDeg = alt * (180 / Math.PI);
+
+  // Below horizon (night)
+  if (altDeg < -6) {
+    return {
+      turbidity: 1,
+      rayleigh: 0.1,
+      mieCoefficient: 0.001,
+      mieDirectionalG: 0.8,
+      isNight: true,
+      sunAltitude: altDeg,
+    };
+  }
+
+  // Twilight / golden hour (-6 to 10 degrees)
+  if (altDeg < 10) {
+    const t = (altDeg + 6) / 16; // 0 to 1
+    return {
+      turbidity: 2 + t * 4,
+      rayleigh: 0.5 + t * 2.5,
+      mieCoefficient: 0.005 + t * 0.02,
+      mieDirectionalG: 0.7 + t * 0.2,
+      isNight: false,
+      sunAltitude: altDeg,
+    };
+  }
+
+  // Full day (10+ degrees)
+  return {
+    turbidity: 6 + Math.min(altDeg / 10, 4),
+    rayleigh: 3,
+    mieCoefficient: 0.025,
+    mieDirectionalG: 0.9,
+    isNight: false,
+    sunAltitude: altDeg,
+  };
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * Weather fetcher using Open-Meteo (completely free, zero API key).
+ * Maps weather codes to simple conditions for the 3D scene.
+ */
+
+const WEATHER_CODE_MAP = {
+  0: 'clear',        // Clear sky
+  1: 'clear',        // Mainly clear
+  2: 'clouds',       // Partly cloudy
+  3: 'clouds',       // Overcast
+  45: 'fog',         // Fog
+  48: 'fog',         // Depositing rime fog
+  51: 'drizzle',     // Light drizzle
+  53: 'drizzle',     // Moderate drizzle
+  55: 'drizzle',     // Dense drizzle
+  61: 'rain',        // Slight rain
+  63: 'rain',        // Moderate rain
+  65: 'rain',        // Heavy rain
+  71: 'snow',        // Slight snow
+  73: 'snow',        // Moderate snow
+  75: 'snow',        // Heavy snow
+  77: 'snow',        // Snow grains
+  80: 'rain',        // Rain showers slight
+  81: 'rain',        // Rain showers moderate
+  82: 'rain',        // Rain showers violent
+  85: 'snow',        // Snow showers slight
+  86: 'snow',        // Snow showers heavy
+  95: 'thunderstorm',// Thunderstorm
+  96: 'thunderstorm',// Thunderstorm hail
+  99: 'thunderstorm',// Thunderstorm heavy hail
+};
+
+const DEFAULT_WEATHER = {
+  condition: 'clear',
+  temperature: 25,
+  humidity: 50,
+  windSpeed: 3,
+  cloudCover: 0,
+};
+
+export async function fetchWeather(lat, lon) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,cloud_cover`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Weather API ${res.status}`);
+    const data = await res.json();
+    const c = data.current;
+
+    return {
+      condition: WEATHER_CODE_MAP[c.weather_code] || 'clear',
+      temperature: c.temperature_2m,
+      humidity: c.relative_humidity_2m,
+      windSpeed: c.wind_speed_10m,
+      cloudCover: c.cloud_cover,
+    };
+  } catch (err) {
+    console.warn('Weather fetch failed, using defaults:', err.message);
+    return DEFAULT_WEATHER;
+  }
+}
+
+/**
+ * Map weather condition to scene visual parameters.
+ */
+export function getWeatherSceneParams(weather) {
+  const base = {
+    fogDensity: 0.002,
+    ambientIntensity: 0.5,
+    turbidityBoost: 0,
+    particleType: null,
+    particleCount: 0,
+    windStrength: weather.windSpeed / 20,
+  };
+
+  switch (weather.condition) {
+    case 'clear':
+      return { ...base, fogDensity: 0.001, ambientIntensity: 0.6 };
+    case 'clouds':
+      return { ...base, fogDensity: 0.003, ambientIntensity: 0.4, turbidityBoost: 3 };
+    case 'fog':
+      return { ...base, fogDensity: 0.015, ambientIntensity: 0.3, turbidityBoost: 5 };
+    case 'drizzle':
+      return { ...base, fogDensity: 0.005, ambientIntensity: 0.35, particleType: 'rain', particleCount: 500 };
+    case 'rain':
+      return { ...base, fogDensity: 0.008, ambientIntensity: 0.25, particleType: 'rain', particleCount: 2000, turbidityBoost: 4 };
+    case 'snow':
+      return { ...base, fogDensity: 0.006, ambientIntensity: 0.4, particleType: 'snow', particleCount: 1500, turbidityBoost: 2 };
+    case 'thunderstorm':
+      return { ...base, fogDensity: 0.01, ambientIntensity: 0.15, particleType: 'rain', particleCount: 3000, turbidityBoost: 6 };
+    default:
+      return base;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔═════════════════════════════════════════════════╗
+ * ║  App.jsx — Root application component           ║
+ * ╚═════════════════════════════════════════════════╝
+ *
+ * This renders:
+ *   1. LoadingScreen (shown until 3D scene is ready)
+ *   2. Canvas with all 3D content (SceneController)
+ *   3. HTML overlays (HUD, InfoPanel, PortfolioOverlay)
+ *
+ * HOW TO EDIT:
+ *   - Canvas settings (FOV, DPR) are configured below
+ *   - All overlay components are imported and always rendered
+ *   - No mode switching — everything is always accessible
+ */
+
+import { Suspense, useState, useCallback } from 'react';
+import { Canvas } from '@react-three/fiber';
+import useStore from './store/useStore';
+import SceneController from './components/SceneController';
+import LoadingScreen from './components/overlay/LoadingScreen';
+import Overlay from './components/overlay/Overlay';
+import InfoPanel from './components/ui/InfoPanel';
+import PortfolioOverlay from './components/portfolio/PortfolioOverlay';
+
+export default function App() {
+  const qualityLevel = useStore((s) => s.qualityLevel);
+  const hoveredObject = useStore((s) => s.hoveredObject);
+
+  // Portfolio panel open/close state
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
+  const openPortfolio = useCallback(() => setPortfolioOpen(true), []);
+  const closePortfolio = useCallback(() => setPortfolioOpen(false), []);
+
+  // Cap DPR based on quality level and actual device DPR
+  const maxDpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr =
+    qualityLevel === 'low' ? [1, 1] :
+    qualityLevel === 'medium' ? [1, 1.5] :
+    [1, maxDpr];
+
+  return (
+    <>
+      {/* Loading screen — auto-hides when scene is ready */}
+      <LoadingScreen onEnter={openPortfolio} />
+
+      {/* Main container */}
+      <div
+        className={`app-root ${hoveredObject ? 'cursor-pointer' : ''}`}
+        style={{ width: '100%', height: '100%' }}
+      >
+        {/* ── 3D Canvas ── */}
+        <Canvas
+          shadows={qualityLevel !== 'low'}
+          dpr={dpr}
+          camera={{ fov: 65, near: 0.1, far: 1000, position: [0, 1.7, 2] }}
+          gl={{
+            antialias: qualityLevel !== 'low',
+            powerPreference: 'high-performance',
+            stencil: false,
+          }}
+          id="main-canvas"
+        >
+          <Suspense fallback={null}>
+            <SceneController />
+          </Suspense>
+        </Canvas>
+
+        {/* ── HTML Overlays (always rendered, always accessible) ── */}
+        <InfoPanel />
+        <Overlay onOpenPortfolio={openPortfolio} />
+
+        {/* Interaction hint — visible when hovering a 3D object */}
+        {hoveredObject && (
+          <div className="interact-prompt">
+            <span className="interact-text">Click to inspect</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Portfolio Overlay (slide-in panel) ── */}
+      <PortfolioOverlay isOpen={portfolioOpen} onClose={closePortfolio} />
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ╔════════════════════════════════════════════════════════════════╗
+ * ║  index.css — Complete stylesheet for The Balcony               ║
+ * ╚════════════════════════════════════════════════════════════════╝
+ *
+ * ORGANIZATION:
+ *   1. Fonts & Variables
+ *   2. Reset & Base
+ *   3. Loading Screen
+ *   4. HUD (weather, time, controls hint, action buttons)
+ *   5. Settings Panel
+ *   6. Info Panel (3D object inspection)
+ *   7. Interaction Prompt
+ *   8. Portfolio Overlay (About, Projects, Diary, Contact)
+ *   9. Animations
+ *  10. Responsive Breakpoints
+ *
+ * HOW TO EDIT COLORS:
+ *   All colors use CSS custom properties in :root.
+ *   Change them there to restyle everything at once.
+ *   The theme.js file also sets these via JavaScript.
+ */
+
+/* ═══════════════════════════════════════════
+   1. FONTS & VARIABLES
+   ═══════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ── Color palette (edit here to restyle) ── */
+  --color-primary: #D4A574;
+  --color-secondary: #8B6F47;
+  --color-accent: #E8C4A0;
+  --color-highlight: #FF9F6B;
+  --color-text: #F5E6D3;
+  --color-text-dim: rgba(255, 255, 255, 0.45);
+  --color-ui-bg: rgba(12, 10, 8, 0.72);
+  --color-ui-border: rgba(212, 165, 116, 0.15);
+  --color-ui-hover: rgba(212, 165, 116, 0.08);
+  --color-surface: rgba(16, 13, 10, 0.92);
+
+  /* ── Typography ── */
+  --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* ── Spacing ── */
+  --radius: 10px;
+  --radius-lg: 16px;
+  --blur: 16px;
+
+  /* ── Touch target minimum (WCAG 2.1) ── */
+  --min-touch: 44px;
+}
+
+/* ═══════════════════════════════════════════
+   2. RESET & BASE
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100%; height: 100%; overflow: hidden;
+  font-family: var(--font-main);
+  background: #080808;
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+canvas { display: block; touch-action: none; }
+
+/* Cursor changes when hovering interactable 3D objects */
+.app-root.cursor-pointer canvas { cursor: pointer; }
+
+/* ═══════════════════════════════════════════
+   3. LOADING SCREEN
+   ═══════════════════════════════════════════ */
+.loading-screen {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: #080808;
+  transition: opacity 0.8s ease, visibility 0.8s ease;
+}
+.loading-screen.loaded { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.ls-content { text-align: center; padding: 1.5rem; }
+.ls-logo {
+  font-size: clamp(2rem, 5vw, 2.5rem);
+  color: var(--color-primary); margin-bottom: 1.5rem;
+  opacity: 0.7; animation: breathe 3s ease-in-out infinite;
+}
+.ls-title {
+  font-size: clamp(1rem, 3vw, 1.4rem);
+  font-weight: 300; letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6); margin-bottom: 2rem;
+}
+.ls-bar {
+  width: min(160px, 50vw); height: 2px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 1px; overflow: hidden;
+}
+.ls-bar-fill {
+  height: 100%; background: var(--color-primary);
+  border-radius: 1px; transition: width 0.8s ease;
+}
+.ls-hint {
+  margin-top: 1.5rem;
+  font-size: clamp(0.6rem, 1.5vw, 0.7rem);
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.05); }
+}
+
+/* ═══════════════════════════════════════════
+   4. HUD ELEMENTS
+   ═══════════════════════════════════════════ */
+
+/* Weather + Time badge */
+.hud-top {
+  position: fixed; top: 0.75rem; right: 0.75rem; z-index: 30;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  background: var(--color-ui-bg);
+  border: 1px solid var(--color-ui-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(var(--blur));
+  pointer-events: none;
+  font-size: clamp(0.65rem, 1.5vw, 0.75rem);
+}
+.hud-weather { display: flex; align-items: center; gap: 0.25rem; }
+.hud-emoji { font-size: 0.85rem; }
+.hud-temp { color: var(--color-primary); font-weight: 600; }
+.hud-time { color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+
+/* Controls hint (auto-fades after 10s) */
+.hud-controls-hint {
+  position: fixed; bottom: 0.75rem; left: 0.75rem; z-index: 30;
+  font-size: clamp(0.6rem, 1.3vw, 0.7rem);
+  color: var(--color-text-dim);
+  background: var(--color-ui-bg);
+  border: 1px solid var(--color-ui-border);
+  border-radius: 8px; padding: 0.4rem 0.7rem;
+  backdrop-filter: blur(var(--blur));
+  animation: fadeOut 0.5s forwards 10s;
+  pointer-events: none;
+}
+
+/* Action buttons (bottom-right) */
+.hud-actions {
+  position: fixed; bottom: 0.75rem; right: 0.75rem; z-index: 40;
+  display: flex; gap: 0.35rem;
+}
+.hud-btn {
+  width: var(--min-touch); height: var(--min-touch);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-ui-bg);
+  border: 1px solid var(--color-ui-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(var(--blur));
+  color: var(--color-text-dim); font-size: 1rem;
+  cursor: pointer; transition: all 0.2s ease; outline: none;
+}
+.hud-btn:hover, .hud-btn:focus-visible {
+  background: var(--color-ui-hover);
+  border-color: rgba(212, 165, 116, 0.3);
+  color: var(--color-text);
+}
+.hud-btn.active { border-color: rgba(212, 165, 116, 0.4); color: var(--color-primary); }
+.hud-btn:focus-visible { outline: 2px solid var(--color-highlight); outline-offset: 2px; }
+
+/* Portfolio button — slightly larger, distinctive */
+.portfolio-btn {
+  font-size: 1.2rem;
+  background: rgba(212, 165, 116, 0.1);
+  border-color: rgba(212, 165, 116, 0.25);
+  color: var(--color-primary);
+}
+.portfolio-btn:hover { background: rgba(212, 165, 116, 0.18); }
+
+/* ═══════════════════════════════════════════
+   5. SETTINGS PANEL
+   ═══════════════════════════════════════════ */
+.settings-panel-backdrop {
+  position: fixed; inset: 0; z-index: 55;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+.settings-panel {
+  position: fixed; z-index: 60;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(340px, 90vw);
+  max-height: 80vh; padding: 1.25rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-ui-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(24px);
+  animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+}
+.sp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
+.sp-title { font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; }
+.sp-close {
+  width: var(--min-touch); height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px; color: var(--color-text-dim);
+  font-size: 0.75rem; cursor: pointer; transition: all 0.2s;
+}
+.sp-close:hover { background: rgba(255,255,255,0.08); color: var(--color-text); }
+.sp-section { margin-bottom: 1.25rem; }
+.sp-label {
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--color-text-dim);
+  margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;
+}
+.sp-value { font-weight: 400; color: var(--color-primary); text-transform: none; letter-spacing: 0; }
+.sp-row { display: flex; align-items: center; gap: 0.5rem; }
+.sp-icon { font-size: 0.8rem; opacity: 0.4; }
+.sp-slider {
+  flex: 1; -webkit-appearance: none; appearance: none;
+  height: 3px; background: rgba(255,255,255,0.1);
+  border-radius: 2px; outline: none;
+}
+.sp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--color-primary);
+  cursor: pointer; border: 2px solid rgba(0,0,0,0.3);
+}
+.sp-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-primary); cursor: pointer;
+  border: 2px solid rgba(0,0,0,0.3);
+}
+.sp-reset {
+  margin-top: 0.4rem; padding: 0.3rem 0.6rem;
+  background: none; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 5px; color: var(--color-text-dim);
+  font-family: var(--font-main); font-size: 0.6rem;
+  cursor: pointer; transition: all 0.2s;
+}
+.sp-reset:hover { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.5); }
+.sp-weather-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem; }
+.sp-weather-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
+  padding: 0.45rem 0.15rem; min-height: var(--min-touch);
+  background: rgba(255,255,255,0.02); border: 1px solid transparent;
+  border-radius: 8px; cursor: pointer; transition: all 0.2s;
+}
+.sp-weather-btn:hover { background: rgba(255,255,255,0.05); }
+.sp-weather-btn.active { background: rgba(255,159,107,0.08); border-color: rgba(212,165,116,0.25); }
+.sp-weather-btn span:first-child { font-size: 1.1rem; }
+.sp-weather-name { font-size: 0.5rem; color: var(--color-text-dim); font-family: var(--font-main); }
+.sp-weather-btn.active .sp-weather-name { color: var(--color-highlight); }
+.sp-quality-row { display: flex; gap: 0.3rem; }
+.sp-quality-btn {
+  flex: 1; padding: 0.5rem; min-height: var(--min-touch);
+  text-align: center; background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;
+  color: var(--color-text-dim); font-family: var(--font-main);
+  font-size: 0.65rem; font-weight: 500; cursor: pointer; transition: all 0.2s;
+}
+.sp-quality-btn:hover { background: rgba(255,255,255,0.05); }
+.sp-quality-btn.active { background: rgba(255,159,107,0.08); border-color: rgba(212,165,116,0.25); color: var(--color-highlight); }
+.sp-toggle-row { display: flex; justify-content: space-between; align-items: center; }
+.sp-toggle {
+  width: 42px; height: 24px; padding: 3px;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px; cursor: pointer; position: relative; transition: all 0.2s;
+}
+.sp-toggle.on { background: rgba(212,165,116,0.25); border-color: var(--color-primary); }
+.sp-toggle-knob {
+  display: block; width: 16px; height: 16px;
+  background: rgba(255,255,255,0.5); border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+.sp-toggle.on .sp-toggle-knob { transform: translateX(18px); background: var(--color-primary); }
+
+/* ═══════════════════════════════════════════
+   6. INFO PANEL (3D object inspection)
+   ═══════════════════════════════════════════ */
+.game-panel {
+  position: fixed; left: 1rem; bottom: 4.5rem; z-index: 35;
+  width: min(360px, calc(100vw - 2rem));
+  padding: 1.25rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-ui-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(20px);
+  transform: translateY(20px); opacity: 0; pointer-events: none;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.game-panel.visible { transform: translateY(0); opacity: 1; pointer-events: auto; }
+.gp-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; }
+.gp-category {
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--color-highlight);
+  padding: 0.2rem 0.5rem; background: rgba(255,159,107,0.08); border-radius: 4px;
+}
+.gp-close {
+  width: var(--min-touch); height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px; color: var(--color-text-dim);
+  font-size: 0.75rem; cursor: pointer; transition: all 0.2s;
+}
+.gp-close:hover { background: rgba(255,255,255,0.08); color: var(--color-text); }
+.gp-title { font-size: clamp(1rem, 2.5vw, 1.15rem); font-weight: 600; line-height: 1.3; margin-bottom: 0.4rem; }
+.gp-divider { height: 1px; background: rgba(255,255,255,0.06); margin-bottom: 0.5rem; }
+.gp-desc { font-size: clamp(0.75rem, 1.8vw, 0.8rem); font-weight: 300; line-height: 1.65; color: var(--color-text-dim); }
+
+/* ═══════════════════════════════════════════
+   7. INTERACTION PROMPT
+   ═══════════════════════════════════════════ */
+.interact-prompt {
+  position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%);
+  z-index: 25; display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  background: var(--color-ui-bg); border: 1px solid var(--color-ui-border);
+  border-radius: 8px; backdrop-filter: blur(var(--blur));
+  animation: slideUp 0.2s ease; pointer-events: none;
+}
+.interact-text { font-size: clamp(0.65rem, 1.5vw, 0.72rem); color: var(--color-text-dim); }
+
+/* ═══════════════════════════════════════════
+   8. PORTFOLIO OVERLAY
+   ═══════════════════════════════════════════ */
+
+/* Backdrop */
+.portfolio-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0);
+  transition: background 0.4s ease;
+  pointer-events: none;
+}
+.portfolio-backdrop.open {
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+/* Panel — slides in from right */
+.portfolio-panel {
+  position: fixed; top: 0; right: 0; z-index: 101;
+  width: min(520px, 100vw);
+  height: 100vh; height: 100dvh;
+  display: flex; flex-direction: column;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-ui-border);
+  transform: translateX(100%);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+.portfolio-panel.open { transform: translateX(0); }
+
+/* Header */
+.pp-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 1.5rem 1.5rem 0.75rem;
+  flex-shrink: 0;
+}
+.pp-name {
+  font-size: clamp(1.1rem, 3vw, 1.4rem);
+  font-weight: 600; letter-spacing: 0.02em;
+}
+.pp-tagline {
+  font-size: clamp(0.65rem, 1.8vw, 0.75rem);
+  color: var(--color-primary); margin-top: 0.15rem;
+}
+.pp-close {
+  width: var(--min-touch); height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; color: var(--color-text-dim);
+  font-size: 0.85rem; cursor: pointer; transition: all 0.2s;
+  flex-shrink: 0;
+}
+.pp-close:hover { background: rgba(255,255,255,0.08); color: var(--color-text); }
+
+/* Tabs */
+.pp-tabs {
+  display: flex; gap: 0; padding: 0 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0; overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.pp-tabs::-webkit-scrollbar { display: none; }
+.pp-tab {
+  flex: 1; min-width: 0; padding: 0.7rem 0.5rem;
+  min-height: var(--min-touch);
+  display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--color-text-dim); cursor: pointer;
+  font-family: var(--font-main);
+  transition: all 0.2s;
+}
+.pp-tab:hover { color: var(--color-text); }
+.pp-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+.pp-tab-icon { font-size: 1rem; }
+.pp-tab-label { font-size: 0.6rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Content area (scrolls) */
+.pp-content {
+  flex: 1; overflow-y: auto; padding: 1.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+.pp-content::-webkit-scrollbar { width: 4px; }
+.pp-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* Sections */
+.pp-section { }
+.pp-section-title {
+  font-size: clamp(0.9rem, 2.5vw, 1.1rem);
+  font-weight: 600; margin-bottom: 0.5rem;
+}
+.pp-section-desc {
+  font-size: clamp(0.72rem, 1.8vw, 0.8rem);
+  color: var(--color-text-dim); line-height: 1.6; margin-bottom: 1.25rem;
+}
+.pp-subsection-title {
+  font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--color-text-dim);
+  margin-top: 1.5rem; margin-bottom: 0.75rem;
+}
+
+/* About bio */
+.pp-about-bio { display: flex; gap: 1.25rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.pp-profile-img {
+  width: 80px; height: 80px; border-radius: 50%;
+  object-fit: cover; border: 2px solid var(--color-ui-border);
+  flex-shrink: 0;
+}
+.pp-bio-text p {
+  font-size: clamp(0.75rem, 1.8vw, 0.82rem);
+  color: rgba(255,255,255,0.6); line-height: 1.7; margin-bottom: 0.75rem;
+}
+.pp-resume-link {
+  display: inline-block; padding: 0.5rem 1rem;
+  background: rgba(212,165,116,0.1); border: 1px solid rgba(212,165,116,0.2);
+  border-radius: 8px; color: var(--color-primary);
+  text-decoration: none; font-size: 0.75rem; font-weight: 500;
+  transition: all 0.2s;
+}
+.pp-resume-link:hover { background: rgba(212,165,116,0.18); }
+
+/* Skills */
+.pp-skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+.pp-skill-group { }
+.pp-skill-category {
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--color-primary); margin-bottom: 0.4rem;
+}
+.pp-skill-list { list-style: none; }
+.pp-skill-list li {
+  font-size: 0.72rem; color: rgba(255,255,255,0.5);
+  padding: 0.15rem 0; line-height: 1.5;
+}
+
+/* Projects grid */
+.pp-projects-grid { display: flex; flex-direction: column; gap: 1rem; }
+.project-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius-lg); overflow: hidden;
+  transition: border-color 0.2s;
+}
+.project-card:hover { border-color: var(--card-accent, var(--color-ui-border)); }
+.pc-image-area { position: relative; aspect-ratio: 16/9; overflow: hidden; }
+.pc-image-area img { width: 100%; height: 100%; object-fit: cover; }
+.pc-image-placeholder {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.06));
+}
+.pc-placeholder-icon { font-size: 2rem; opacity: 0.15; }
+.pc-category-badge {
+  position: absolute; top: 0.6rem; left: 0.6rem;
+  font-size: 0.55rem; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 0.2rem 0.5rem;
+  background: var(--color-surface); border-radius: 4px;
+  color: var(--card-accent, var(--color-highlight));
+}
+.pc-body { padding: 1rem; }
+.pc-title { font-size: clamp(0.85rem, 2vw, 0.95rem); font-weight: 600; margin-bottom: 0.35rem; }
+.pc-description { font-size: 0.75rem; color: var(--color-text-dim); line-height: 1.6; margin-bottom: 0.5rem; }
+.pc-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
+.pc-tag {
+  font-size: 0.55rem; padding: 0.15rem 0.4rem;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px; color: var(--color-text-dim);
+}
+.pc-links { display: flex; gap: 0.5rem; }
+.pc-link {
+  font-size: 0.7rem; color: var(--color-primary);
+  text-decoration: none; font-weight: 500;
+  transition: color 0.2s;
+}
+.pc-link:hover { color: var(--color-highlight); }
+
+/* Diary */
+.diary-filters { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 1.25rem; }
+.diary-filter-btn {
+  padding: 0.35rem 0.65rem; min-height: 36px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  font-family: var(--font-main); font-size: 0.65rem;
+  color: var(--color-text-dim); cursor: pointer;
+  transition: all 0.2s;
+}
+.diary-filter-btn:hover { background: rgba(255,255,255,0.06); }
+.diary-filter-btn.active { background: rgba(212,165,116,0.1); border-color: rgba(212,165,116,0.25); color: var(--color-primary); }
+.diary-entries { display: flex; flex-direction: column; gap: 1rem; }
+.diary-empty { font-size: 0.75rem; color: var(--color-text-dim); text-align: center; padding: 2rem 0; }
+.diary-entry {
+  padding: 1rem; border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius); background: rgba(255,255,255,0.01);
+}
+.de-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+.de-meta { display: flex; align-items: center; gap: 0.5rem; }
+.de-type-badge {
+  font-size: 0.6rem; padding: 0.15rem 0.4rem;
+  background: rgba(255,255,255,0.04); border-radius: 4px;
+  color: var(--color-primary);
+}
+.de-date { font-size: 0.6rem; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.de-mood { font-size: 1rem; }
+.de-title { font-size: clamp(0.85rem, 2vw, 0.95rem); font-weight: 600; margin-bottom: 0.35rem; }
+.de-content { font-size: 0.75rem; color: rgba(255,255,255,0.55); line-height: 1.65; margin-bottom: 0.5rem; }
+.de-image { width: 100%; border-radius: 8px; margin-bottom: 0.5rem; }
+.de-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.de-tag { font-size: 0.6rem; color: var(--color-text-dim); }
+
+/* Contact form */
+.contact-form { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+.cf-field label {
+  display: block; font-size: 0.6rem; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--color-text-dim); margin-bottom: 0.3rem;
+}
+.cf-field input, .cf-field textarea {
+  width: 100%; padding: 0.6rem 0.75rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; color: var(--color-text);
+  font-family: var(--font-main); font-size: 0.8rem;
+  outline: none; transition: border-color 0.2s;
+}
+.cf-field input:focus, .cf-field textarea:focus { border-color: var(--color-primary); }
+.cf-field textarea { resize: vertical; min-height: 100px; }
+.cf-submit {
+  padding: 0.65rem 1.5rem; min-height: var(--min-touch);
+  background: rgba(212,165,116,0.12);
+  border: 1px solid rgba(212,165,116,0.25);
+  border-radius: 8px; color: var(--color-primary);
+  font-family: var(--font-main); font-size: 0.8rem;
+  font-weight: 500; cursor: pointer; transition: all 0.2s;
+  align-self: flex-start;
+}
+.cf-submit:hover:not(:disabled) { background: rgba(212,165,116,0.2); }
+.cf-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+.cf-error { font-size: 0.7rem; color: #ff6b6b; }
+.cf-note { font-size: 0.65rem; color: var(--color-text-dim); line-height: 1.5; }
+.cf-note a { color: var(--color-primary); }
+.cf-note code { font-family: var(--font-mono); font-size: 0.6rem; background: rgba(255,255,255,0.06); padding: 0.1rem 0.3rem; border-radius: 3px; }
+
+/* Contact social links */
+.contact-social { margin-top: 1rem; }
+.cs-links { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.cs-link {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.5rem 0.8rem; min-height: var(--min-touch);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; text-decoration: none;
+  color: var(--color-text-dim); font-size: 0.75rem;
+  transition: all 0.2s;
+}
+.cs-link:hover { background: rgba(255,255,255,0.06); color: var(--color-text); }
+.cs-icon { font-size: 1rem; }
+
+/* Footer */
+.pp-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.6rem; color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+.pp-social-row { display: flex; gap: 0.5rem; }
+.pp-social-link {
+  font-size: 0.9rem; text-decoration: none;
+  transition: transform 0.2s;
+}
+.pp-social-link:hover { transform: scale(1.2); }
+
+/* ═══════════════════════════════════════════
+   9. ANIMATIONS
+   ═══════════════════════════════════════════ */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { from { opacity: 1; } to { opacity: 0; visibility: hidden; pointer-events: none; } }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: translate(-50%,-50%) scale(0.95); }
+  to { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+}
+
+/* ═══════════════════════════════════════════
+   10. RESPONSIVE BREAKPOINTS
+   ═══════════════════════════════════════════ */
+
+/* Tablet (768px+) */
+@media (min-width: 768px) {
+  .hud-top { top: 1.25rem; right: 1.25rem; padding: 0.45rem 0.85rem; }
+  .hud-actions { bottom: 1.25rem; right: 1.25rem; }
+  .hud-controls-hint { bottom: 1.25rem; left: 1.25rem; }
+  .game-panel { left: 1.5rem; bottom: 5rem; }
+}
+
+/* Large desktop (1200px+) */
+@media (min-width: 1200px) {
+  .portfolio-panel { width: 560px; }
+  .pp-skills-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Small phones (max 480px) */
+@media (max-width: 480px) {
+  .portfolio-panel { width: 100vw; border-left: none; }
+  .pp-header { padding: 1rem 1rem 0.5rem; }
+  .pp-tabs { padding: 0 1rem; }
+  .pp-content { padding: 1rem; }
+  .pp-footer { padding: 0.5rem 1rem; }
+  .game-panel { left: 0.5rem; right: 0.5rem; bottom: 4rem; width: auto; }
+  .settings-panel { width: 95vw; }
+  .interact-prompt { bottom: 4rem; }
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import './index.css';
+import App from './App.jsx';
+import { applyThemeToDOM } from './config/theme.js';
+
+// Apply theme CSS custom properties
+applyThemeToDOM();
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#080808" />
+
+    <!-- SEO -->
+    <title>The Balcony — A Spatial Portfolio</title>
+    <meta name="description" content="An immersive 3D portfolio experience showcasing creative technology, product design, and research. Built with React Three Fiber." />
+    <meta name="author" content="Your Name" />
+
+    <!-- Open Graph (social media previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="The Balcony — A Spatial Portfolio" />
+    <meta property="og:description" content="An immersive 3D interactive portfolio built with Three.js and React." />
+    <meta property="og:url" content="https://yoursite.com" />
+
+    <!-- Twitter card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="The Balcony — A Spatial Portfolio" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- WebGL detection — shows warning before JS even loads -->
+    <style>
+      .no-webgl-warning {
+        display: none;
+        position: fixed; inset: 0;
+        background: #080808; color: #F5E6D3;
+        font-family: -apple-system, sans-serif;
+        text-align: center;
+        padding: 3rem 1.5rem;
+        z-index: 10000;
+      }
+      .no-webgl-warning h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+      .no-webgl-warning p { font-size: 0.9rem; color: rgba(255,255,255,0.5); line-height: 1.6; }
+    </style>
+    <script>
+      // Quick WebGL check before React loads
+      try {
+        var c = document.createElement('canvas');
+        var ok = !!(c.getContext('webgl2') || c.getContext('webgl'));
+        if (!ok) throw new Error();
+      } catch (e) {
+        document.addEventListener('DOMContentLoaded', function() {
+          document.getElementById('root').style.display = 'none';
+          document.getElementById('no-webgl').style.display = 'flex';
+          document.getElementById('no-webgl').style.alignItems = 'center';
+          document.getElementById('no-webgl').style.justifyContent = 'center';
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Shown only if WebGL is unavailable -->
+    <div id="no-webgl" class="no-webgl-warning">
+      <div>
+        <h1>WebGL Not Available</h1>
+        <p>This portfolio uses 3D graphics that require WebGL support.<br/>
+        Please try a modern browser like Chrome, Firefox, or Edge.</p>
+      </div>
+    </div>
+
+    <!-- Shown only if JavaScript is disabled -->
+    <noscript>
+      <div style="position:fixed;inset:0;background:#080808;color:#F5E6D3;display:flex;align-items:center;justify-content:center;text-align:center;padding:2rem;font-family:sans-serif;">
+        <div>
+          <h1>JavaScript Required</h1>
+          <p>This portfolio is an interactive 3D experience that requires JavaScript to run.</p>
+        </div>
+      </div>
+    </noscript>
+
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

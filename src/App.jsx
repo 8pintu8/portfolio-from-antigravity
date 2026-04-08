@@ -14,8 +14,9 @@
  *   - No mode switching — everything is always accessible
  */
 
-import { Suspense, useState, useCallback } from 'react';
+import { Suspense, useState, useCallback, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
+import * as THREE from 'three';
 import useStore from './store/useStore';
 import SceneController from './components/SceneController';
 import LoadingScreen from './components/overlay/LoadingScreen';
@@ -26,18 +27,28 @@ import PortfolioOverlay from './components/portfolio/PortfolioOverlay';
 export default function App() {
   const qualityLevel = useStore((s) => s.qualityLevel);
   const hoveredObject = useStore((s) => s.hoveredObject);
+  const activeObject = useStore((s) => s.activeObject);
+  const clearActiveObject = useStore((s) => s.clearActiveObject);
+  
+  // Portfolio panel state from store
+  const portfolioOpen = useStore((s) => s.portfolioOpen);
+  const setPortfolioOpen = useStore((s) => s.setPortfolioOpen);
+  const setActivePortfolioTab = useStore((s) => s.setActivePortfolioTab);
 
-  // Portfolio panel open/close state
-  const [portfolioOpen, setPortfolioOpen] = useState(false);
-  const openPortfolio = useCallback(() => setPortfolioOpen(true), []);
-  const closePortfolio = useCallback(() => setPortfolioOpen(false), []);
+  const openPortfolio = useCallback(() => setPortfolioOpen(true), [setPortfolioOpen]);
+  const closePortfolio = useCallback(() => setPortfolioOpen(false), [setPortfolioOpen]);
 
-  // Cap DPR based on quality level and actual device DPR
+  // Listen for 3D trigger clicks
+  useEffect(() => {
+    if (activeObject?.isPortfolioSection) {
+      setActivePortfolioTab(activeObject.sectionId);
+      setPortfolioOpen(true);
+      clearActiveObject(); // We intercepted it, don't show the InfoPanel
+    }
+  }, [activeObject, setActivePortfolioTab, setPortfolioOpen, clearActiveObject]);
+
+  // Do NOT change dpr or gl properties dynamically as it completely rebuilds the WebGL context and freezes the site.
   const maxDpr = Math.min(2, window.devicePixelRatio || 1);
-  const dpr =
-    qualityLevel === 'low' ? [1, 1] :
-    qualityLevel === 'medium' ? [1, 1.5] :
-    [1, maxDpr];
 
   return (
     <>
@@ -51,11 +62,11 @@ export default function App() {
       >
         {/* ── 3D Canvas ── */}
         <Canvas
-          shadows={qualityLevel !== 'low'}
-          dpr={dpr}
+          shadows={{ type: THREE.PCFShadowMap }}
+          dpr={[1, maxDpr]}
           camera={{ fov: 65, near: 0.1, far: 1000, position: [0, 1.7, 2] }}
           gl={{
-            antialias: qualityLevel !== 'low',
+            antialias: true,
             powerPreference: 'high-performance',
             stencil: false,
           }}
